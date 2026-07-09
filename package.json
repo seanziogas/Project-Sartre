@@ -5,7 +5,8 @@
   "description": "The Kiln's GTM Operating System — one platform, instanced per client.",
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "engines": {
     "node": ">=22"

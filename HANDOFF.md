@@ -53,7 +53,9 @@ Built and tested (npm workspaces monorepo; `npm test` = 71 passing):
 - `@sartre/pipelines` (Phase 2 started early, per Sean's go-ahead to proceed without credentials) — run engine: MVD gate blocks unready modules from starting, per-step checkpointing with crash resume, hard per-run credit/token budgets, human gates driven by manifest approval policy (block/notify/auto) that park runs as awaiting_approval, gate resolutions emit Layer-8 feedback events, full run journal.
 - CI: GitHub Actions runs build + all eval sets on every push/PR (first run green).
 
-Remaining: live MCP connector clients — **blocked on credentials/sandbox access from Sean** (Salesforce/HubSpot/Clay/Slack/Fathom); ops surface v1 (Next.js — review queues over the pipeline gates, run monitoring, budgets, data health dashboard); live-model eval runs (gated on ANTHROPIC_API_KEY); Postgres adapters for RunStore/CacheStore.
+- `apps/ops` (ops surface v1, Next.js 15) — client list, per-client overview (module × MVD table incl. audit-evaluated-but-not-enabled modules with priced gaps, budget stats), review queue (approve/reject with required attribution + optional reason → gate resolution + Layer-8 feedback event to feedback-events.jsonl), run list/detail (journal, gates, spend), data health dashboard (renders the audit report). Data sources: SARTRE_CLIENTS_DIR (manifests) + SARTRE_DATA_DIR (FileRunStore, reports). **Design note: the ops surface records gate decisions; it does not resume runs — a runner service polls resolved gates and calls engine.resume(). No auth yet (internal v1).** Verified end-to-end against engine-seeded data.
+
+Remaining: live MCP connector clients — **blocked on credentials/sandbox access from Sean** (Salesforce/HubSpot/Clay/Slack/Fathom); the runner service (schedule triggers + resume-on-approval loop); Postgres adapters for RunStore/CacheStore; live-model eval runs (gated on ANTHROPIC_API_KEY); shadow-run validation on two live engagements (Phase 2 exit criterion).
 
 ## Useful research already done (don't redo)
 

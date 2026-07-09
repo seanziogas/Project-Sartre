@@ -4,3 +4,6 @@ node_modules/
 .env.*
 *.tsbuildinfo
 dist/
+.next/
+.sartre-data/
+next-env.d.ts

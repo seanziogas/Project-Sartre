@@ -78,7 +78,12 @@ export interface RunStore {
   save(run: RunRecord): Promise<void>
 }
 
-export class MemoryRunStore implements RunStore {
+/** What the runner service needs beyond basic get/save. */
+export interface RunnerStore extends RunStore {
+  listByStatus(status: RunStatus): Promise<RunRecord[]>
+}
+
+export class MemoryRunStore implements RunnerStore {
   private runs = new Map<string, RunRecord>()
   async get(runId: string): Promise<RunRecord | null> {
     const run = this.runs.get(runId)
@@ -86,6 +91,9 @@ export class MemoryRunStore implements RunStore {
   }
   async save(run: RunRecord): Promise<void> {
     this.runs.set(run.runId, structuredClone(run))
+  }
+  async listByStatus(status: RunStatus): Promise<RunRecord[]> {
+    return [...this.runs.values()].filter((r) => r.status === status).map((r) => structuredClone(r))
   }
 }
 

@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { RunRecord, RunStore } from './types.js'
+import type { RunRecord, RunnerStore, RunStatus } from './types.js'
 
 /**
  * File-backed run store: one JSON file per run under <dir>/<clientId>/runs/.
@@ -8,7 +8,7 @@ import type { RunRecord, RunStore } from './types.js'
  * behind the same interface. Tenancy note: files are partitioned by client
  * directory, and reads are always client-scoped or id-scoped.
  */
-export class FileRunStore implements RunStore {
+export class FileRunStore implements RunnerStore {
   constructor(private readonly dir: string) {}
 
   private runPath(clientId: string, runId: string): string {
@@ -55,6 +55,14 @@ export class FileRunStore implements RunStore {
       }
     }
     return runs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  }
+
+  async listByStatus(status: RunStatus): Promise<RunRecord[]> {
+    const all: RunRecord[] = []
+    for (const clientId of await this.clients()) {
+      all.push(...(await this.list(clientId)).filter((r) => r.status === status))
+    }
+    return all
   }
 
   async clients(): Promise<string[]> {

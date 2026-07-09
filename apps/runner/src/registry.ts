@@ -1,14 +1,18 @@
 import { MapRegistry } from '@sartre/pipelines'
 
 /**
- * Production pipeline registry. As module pipelines ship (Phase 3), they
- * register here — pipeline definitions compose skills from @sartre/skills
- * into module workflows. An empty registry is safe: the runner warns when a
- * schedule fires or a run needs resuming with no registered pipeline.
+ * Production pipeline registry. Pipeline builders live in @sartre/modules
+ * (buildEnrichmentRefreshPipeline, buildReactivationPipeline,
+ * buildInboundRoutingPipeline) — each takes its dependencies (connector
+ * adapters, LLM client, brain-derived config) and returns a
+ * PipelineDefinition. Registration happens here once those dependencies are
+ * wired for a deployment; an empty registry is safe (the runner warns when a
+ * schedule fires or a resume lands with no registered pipeline).
+ *
+ * Example wiring (when connector adapters exist for the deployment):
+ *   import { buildEnrichmentRefreshPipeline } from '@sartre/modules'
+ *   registry.register(buildEnrichmentRefreshPipeline({ pullAccounts, ... }))
  */
 export function buildRegistry(): MapRegistry {
-  const registry = new MapRegistry()
-  // e.g. registry.register(enrichmentRefreshPipeline)
-  //      registry.register(closedLostReactivationPipeline)
-  return registry
+  return new MapRegistry()
 }

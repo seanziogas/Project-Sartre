@@ -23,8 +23,8 @@ Purpose: lets any new Claude Code session (or teammate) in this repo pick up wit
 ## Open items (mirror of PLAN.md §10)
 
 - Sean to drop read-only reference copies of the source repos for Phase 0 extraction.
-- GitHub push pending: local commits exist on `main`; remote `origin` = https://github.com/seanziogas/Project-Sartre.git is connected but the terminal has no GitHub credentials. Fix: `gh auth login` or push once manually so the keychain holds credentials.
-- Git identity is auto-set (`sean@Seans-MacBook-Pro.local`); consider `git config --global user.email "sean.ziogas@2x.marketing"`.
+- ~~GitHub push~~ Done 2026-07-09: `gh auth login` completed, `main` pushed to https://github.com/seanziogas/Project-Sartre and tracking `origin/main`.
+- ~~Git identity~~ Done 2026-07-09: repo-local `user.email` set to `sean.ziogas@2x.marketing` (global config untouched).
 - Naming: "Project Sartre" is the codename; client-facing name TBD before Phase 4.
 - Resourcing + taxonomy sign-off from Services leadership (the merged module map replaces three older track taxonomies).
 

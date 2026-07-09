@@ -40,7 +40,16 @@ Built from the source-material survey:
 - `clients/_template/` — full instance template (client.yaml, _lifecycle.yaml, brain stubs, memory dirs).
 - `knowledge_base/` — imported: 4 playbooks, 4 delivery docs, 6 sales docs (both ICPs, conflict flagged), pod structure, 11 kiln-os patterns/frameworks + extraction rubric. All with provenance headers.
 
-Phase 0 is COMPLETE (taxonomy locked via ADR 0001). Next: Phase 1 — integration hub big four (Salesforce + HubSpot, Clay, Slack/Teams, Fathom) + enrichment cache; data foundation core (Day-1 Audit, canonical model, entity resolution v1); first three skills (List Grader, List Enricher, Campaign Factory — blueprints in docs/architecture/skill-patterns.md); Brain Builder v1; feedback-event schema.
+Phase 0 is COMPLETE (taxonomy locked via ADR 0001).
+
+## Phase 1 status (as of 2026-07-09)
+
+Built and tested (npm workspaces monorepo; `npm test` = 48 passing):
+- `@sartre/core` — canonical data model with per-field provenance; cxt_hub dedup standards as normalize functions; Layer-8 feedback events (human actions + outcomes); client.yaml zod validator with `moduleRunnable` MVD gating; brain frontmatter validator.
+- `@sartre/data` — Day-1 Data Audit (0–100 health score), entity resolution v1 (deterministic waterfall + fuzzy fallback, distinct-domain disqualifier, flag-don't-delete groups), MVD gate evaluation with priced remediation gaps.
+- `@sartre/connectors` — connector contract (staged reads, snapshot-before-write, namespaced-write guard) + portfolio EnrichmentCache (provenance-aware, tenancy-boundary field allowlist).
+
+Remaining in Phase 1 (task list in session): live MCP connector clients (**blocked on credentials/sandbox access from Sean** for Salesforce/HubSpot/Clay/Slack/Fathom); first three skills + eval sets (List Grader, List Enricher, Campaign Factory — blueprints in `docs/architecture/skill-patterns.md`); Brain Builder v1; both skill tracks use the Claude Agent SDK.
 
 ## Useful research already done (don't redo)
 

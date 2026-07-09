@@ -59,6 +59,8 @@ Built and tested (npm workspaces monorepo; `npm test` = 71 passing):
 - `@sartre/db` — Postgres adapters (RunStore/CacheStore/FeedbackLog) behind a `Queryable` interface compatible with pg.Pool; JSONB docs + promoted indexed columns; client_id indexed on every table (tenancy). Tested against PGlite (in-process Postgres) including the full park→decide→resume cycle.
 - `@sartre/shadow` — shadow-run harness: compareGrades (band/adjacent agreement, score deltas, label agreement, top disagreements), compareRouting, compareCopy (similarity + unfilled-slot hard fails) → markdown report. Ready to consume JSON exports of manual-motion outputs whenever a real engagement's data is available.
 
+- `@sartre/learning` (Layer 8 speeds 1–2, Phase 3 pulled forward) — extractExemplars: reasoned corrections → draft exemplar brain files (unexplained corrections are metrics, not lessons; human gate intact); proposeTuning: deterministic override-pattern analysis → evidence-carrying proposals (global/segment grading bias, routing-override clusters — the "$100M threshold" scenario is a test); gateProposals eval-gate hook (annotates, never silently drops); computeReviewMetrics + metricsByPeriod (approve-without-edit/override rates per ISO week — the QBR renewal series).
+
 **Per Sean 2026-07-09: API credentials deprioritized — test with mock data.** Remaining: live connector clients (whenever credentials appear); wiring `apps/ops` to @sartre/db (currently FileRunStore); a deployable runner entrypoint (the Runner class is built; needs a small service wrapper wiring registry + manifest loading); live-model eval runs; shadow-run against real engagement exports (harness ready — needs the exports).
 
 ## Useful research already done (don't redo)

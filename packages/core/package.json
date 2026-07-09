@@ -1,0 +1,21 @@
+{
+  "name": "@sartre/core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./canonical": "./dist/canonical/index.js",
+    "./feedback": "./dist/feedback/index.js",
+    "./manifest": "./dist/manifest/index.js",
+    "./brain": "./dist/brain/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "yaml": "^2.8.0",
+    "zod": "^3.25.0"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "sartre",
+  "private": true,
+  "version": "0.1.0",
+  "description": "The Kiln's GTM Operating System — one platform, instanced per client.",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b packages/*",
+    "test": "vitest run",
+    "typecheck": "tsc -b packages/*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

@@ -50,7 +50,10 @@ Built and tested (npm workspaces monorepo; `npm test` = 71 passing):
 - `@sartre/connectors` — connector contract (staged reads, snapshot-before-write, namespaced-write guard) + portfolio EnrichmentCache (provenance-aware, tenancy-boundary field allowlist).
 - `@sartre/skills` — LlmClient boundary (CI evals use scripted fakes; production = @anthropic-ai/sdk, claude-opus-4-8, adaptive thinking) + four skills with known-answer eval sets: **List Grader** (classify → adversarial review → retry-with-issues), **List Enricher** (cache → provider → web waterfall, credit budget, sentinels), **Campaign Factory** (deterministic two-axis template engine), **Brain Builder v1** (sources → validated draft brain docs; drafts only — human approval is structural).
 
-Remaining in Phase 1: live MCP connector clients — **blocked on credentials/sandbox access from Sean** (Salesforce/HubSpot/Clay/Slack/Fathom). Also not yet done: live-model eval runs for the LLM skills (gated on ANTHROPIC_API_KEY; CI evals use fakes), CI wiring (GitHub Actions running `npm test`).
+- `@sartre/pipelines` (Phase 2 started early, per Sean's go-ahead to proceed without credentials) — run engine: MVD gate blocks unready modules from starting, per-step checkpointing with crash resume, hard per-run credit/token budgets, human gates driven by manifest approval policy (block/notify/auto) that park runs as awaiting_approval, gate resolutions emit Layer-8 feedback events, full run journal.
+- CI: GitHub Actions runs build + all eval sets on every push/PR (first run green).
+
+Remaining: live MCP connector clients — **blocked on credentials/sandbox access from Sean** (Salesforce/HubSpot/Clay/Slack/Fathom); ops surface v1 (Next.js — review queues over the pipeline gates, run monitoring, budgets, data health dashboard); live-model eval runs (gated on ANTHROPIC_API_KEY); Postgres adapters for RunStore/CacheStore.
 
 ## Useful research already done (don't redo)
 

@@ -61,7 +61,11 @@ Built and tested (npm workspaces monorepo; `npm test` = 71 passing):
 
 - `@sartre/learning` (Layer 8 speeds 1–2, Phase 3 pulled forward) — extractExemplars: reasoned corrections → draft exemplar brain files (unexplained corrections are metrics, not lessons; human gate intact); proposeTuning: deterministic override-pattern analysis → evidence-carrying proposals (global/segment grading bias, routing-override clusters — the "$100M threshold" scenario is a test); gateProposals eval-gate hook (annotates, never silently drops); computeReviewMetrics + metricsByPeriod (approve-without-edit/override rates per ISO week — the QBR renewal series).
 
-**Per Sean 2026-07-09: API credentials deprioritized — test with mock data.** Remaining: live connector clients (whenever credentials appear); wiring `apps/ops` to @sartre/db (currently FileRunStore); a deployable runner entrypoint (the Runner class is built; needs a small service wrapper wiring registry + manifest loading); live-model eval runs; shadow-run against real engagement exports (harness ready — needs the exports).
+- Router skill (`@sartre/skills` router.ts) — priority-ordered rules with a condition mini-language (all/any/not, eq/in/gte/lt/exists/matches), reasoning on every decision, dual-revenue helper; 14-case known-answer eval set encoding the InEight rulebook shape.
+- Quality monitoring (`@sartre/data` monitoring.ts) — data contracts (incl. contractsFromModules: enabled modules' MVD requirements become standing contracts, strictest wins) + drift alerts between audit runs (metric decay with warn/critical severities; improvement is never drift).
+- Runner entrypoint (`apps/runner`) — deployable service: env-configured dirs/tick, manifest loading with per-client error isolation, graceful shutdown. Registry in `apps/runner/src/registry.ts` is where Phase 3 pipeline definitions register.
+
+**Per Sean 2026-07-09: API credentials deprioritized — test with mock data.** Remaining: live connector clients (whenever credentials appear); wiring `apps/ops` to @sartre/db (currently FileRunStore); production pipeline definitions composing skills into module workflows (register in apps/runner registry); live-model eval runs; shadow-run against real engagement exports (harness ready — needs the exports).
 
 ## Useful research already done (don't redo)
 

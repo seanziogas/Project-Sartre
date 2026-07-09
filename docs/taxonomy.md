@@ -2,7 +2,7 @@
 
 Phase 0 deliverable. Merges the competing track taxonomies found in cxt_hub into one canonical module set (the PLAN.md §4 module map, now with stable IDs), and maps every source taxonomy onto it.
 
-**Status: DRAFT — requires sign-off from Services leadership** (PLAN.md §10.4), since it replaces the taxonomies below as the internal source of truth.
+**Status: LOCKED — decisions made by Sean 2026-07-09** (see `docs/decisions/0001-taxonomy-icp-scope.md`). This replaces the source taxonomies below as the internal source of truth; communicate to Services leadership when convenient.
 
 > Client-facing note: cxt_hub's SOW skill explicitly bans the word "taxonomy" in client documents (`team/sales/create-sow/SKILL.md`). This doc is internal; SOWs keep using "tracks" with per-engagement letters.
 
@@ -103,8 +103,8 @@ Every item in every source taxonomy is covered; no canonical module exists witho
 
 ---
 
-## 4. Open questions for sign-off
+## 4. Resolved questions (decided by Sean, 2026-07-09)
 
-1. Does Services agree track letters stay free-form per SOW, with module IDs underneath? (Matches actual SOW practice today.)
-2. Any modules to cut from v1 scope? (`marketing.ads-sync` and `sales.takeout` have the thinnest source evidence.)
-3. Related flag, not blocking: cxt_hub carries **two conflicting ICPs** — `sales/01_icp.md` ($100M+ revenue) vs `team/sales/revenue-resources/kiln-icp.md` (May 2026, $10M–$500M ARR, tiered). Sartre imports both and marks the newer one current, but The Kiln should reconcile.
+1. **Track letters stay free-form per SOW, module IDs underneath.** Confirmed — matches actual SOW practice today.
+2. **No modules cut from v1 scope.** The full module set in §2 stands, including `marketing.ads-sync` and `sales.takeout`; re-evaluate later if evidence stays thin.
+3. **ICP: focus on $100M+.** `knowledge_base/sales/icp-canonical.md` is the current ICP. The May-2026 doc (`icp-2026-05.md`, $10M–$500M ARR) is retained as reference only — its tiered-scoring mechanics and PE-segment framing may still inform `revops.tam` scoring design, but its sizing does not.

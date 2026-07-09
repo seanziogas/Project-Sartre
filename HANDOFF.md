@@ -26,7 +26,8 @@ Purpose: lets any new Claude Code session (or teammate) in this repo pick up wit
 - ~~GitHub push~~ Done 2026-07-09: `gh auth login` completed, `main` pushed to https://github.com/seanziogas/Project-Sartre and tracking `origin/main`.
 - ~~Git identity~~ Done 2026-07-09: repo-local `user.email` set to `sean.ziogas@2x.marketing` (global config untouched).
 - Naming: "Project Sartre" is the codename; client-facing name TBD before Phase 4.
-- Resourcing + **taxonomy sign-off from Services leadership** — the canonical module taxonomy is now drafted at `docs/taxonomy.md` (found FOUR competing taxonomies upstream, not three; also flags a $100M+ vs $10M–$500M ICP conflict in cxt_hub).
+- ~~Taxonomy sign-off~~ Done 2026-07-09 (ADR 0001, decided by Sean): taxonomy LOCKED (modules = identity, SOW letters = sequencing); full module set stands for v1; ICP = $100M+ (`icp-canonical.md` governs, 2026-05 doc is reference only). Still to do: communicate the merged taxonomy to Services leadership.
+- Resourcing (who builds beyond Sean + Claude Code, weekly cadence) still open.
 
 ## Phase 0 status (as of 2026-07-09)
 
@@ -39,7 +40,7 @@ Built from the source-material survey:
 - `clients/_template/` — full instance template (client.yaml, _lifecycle.yaml, brain stubs, memory dirs).
 - `knowledge_base/` — imported: 4 playbooks, 4 delivery docs, 6 sales docs (both ICPs, conflict flagged), pod structure, 11 kiln-os patterns/frameworks + extraction rubric. All with provenance headers.
 
-Remaining in Phase 0: taxonomy sign-off (human), then Phase 1 kickoff (connectors + data foundation + first three skills).
+Phase 0 is COMPLETE (taxonomy locked via ADR 0001). Next: Phase 1 — integration hub big four (Salesforce + HubSpot, Clay, Slack/Teams, Fathom) + enrichment cache; data foundation core (Day-1 Audit, canonical model, entity resolution v1); first three skills (List Grader, List Enricher, Campaign Factory — blueprints in docs/architecture/skill-patterns.md); Brain Builder v1; feedback-event schema.
 
 ## Useful research already done (don't redo)
 

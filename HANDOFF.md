@@ -44,12 +44,13 @@ Phase 0 is COMPLETE (taxonomy locked via ADR 0001).
 
 ## Phase 1 status (as of 2026-07-09)
 
-Built and tested (npm workspaces monorepo; `npm test` = 48 passing):
+Built and tested (npm workspaces monorepo; `npm test` = 71 passing):
 - `@sartre/core` — canonical data model with per-field provenance; cxt_hub dedup standards as normalize functions; Layer-8 feedback events (human actions + outcomes); client.yaml zod validator with `moduleRunnable` MVD gating; brain frontmatter validator.
 - `@sartre/data` — Day-1 Data Audit (0–100 health score), entity resolution v1 (deterministic waterfall + fuzzy fallback, distinct-domain disqualifier, flag-don't-delete groups), MVD gate evaluation with priced remediation gaps.
 - `@sartre/connectors` — connector contract (staged reads, snapshot-before-write, namespaced-write guard) + portfolio EnrichmentCache (provenance-aware, tenancy-boundary field allowlist).
+- `@sartre/skills` — LlmClient boundary (CI evals use scripted fakes; production = @anthropic-ai/sdk, claude-opus-4-8, adaptive thinking) + four skills with known-answer eval sets: **List Grader** (classify → adversarial review → retry-with-issues), **List Enricher** (cache → provider → web waterfall, credit budget, sentinels), **Campaign Factory** (deterministic two-axis template engine), **Brain Builder v1** (sources → validated draft brain docs; drafts only — human approval is structural).
 
-Remaining in Phase 1 (task list in session): live MCP connector clients (**blocked on credentials/sandbox access from Sean** for Salesforce/HubSpot/Clay/Slack/Fathom); first three skills + eval sets (List Grader, List Enricher, Campaign Factory — blueprints in `docs/architecture/skill-patterns.md`); Brain Builder v1; both skill tracks use the Claude Agent SDK.
+Remaining in Phase 1: live MCP connector clients — **blocked on credentials/sandbox access from Sean** (Salesforce/HubSpot/Clay/Slack/Fathom). Also not yet done: live-model eval runs for the LLM skills (gated on ANTHROPIC_API_KEY; CI evals use fakes), CI wiring (GitHub Actions running `npm test`).
 
 ## Useful research already done (don't redo)
 

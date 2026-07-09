@@ -158,7 +158,7 @@ A typical 3-month engagement turns on two or three build modules; the always-on 
 
 ### Phase 0 — Foundation (weeks 1–2)
 - This repo becomes the canonical monorepo; define layout.
-- **Re-acquire source repos** (local copies were deleted): cxt_hub, kiln-os, client workspaces. ⚠️ Open item — need the canonical remotes.
+- **Obtain read-only reference copies of source material** (cxt_hub, kiln-os, client workspaces) as local folder drops provided by Sean. ⚠️ Boundary: those are company repos — Sartre never clones, connects to, or edits them; extraction is one-way (read reference copies → write Sartre code/docs).
 - Define the Brain schema and `client.yaml` manifest.
 - Resolve the canonical module/track taxonomy (merge the three competing taxonomies from cxt_hub into the module map above).
 - Import kiln-os conventions and cxt_hub playbooks into the shared knowledge base.
@@ -237,7 +237,8 @@ A typical 3-month engagement turns on two or three build modules; the always-on 
 
 ## 10. Open Items Before Phase 0
 
-1. **Source repo access** — cxt_hub and kiln-os local copies were deleted; need the canonical GitHub remotes (or re-downloaded archives) plus the Hologram/InEight workspaces for skill extraction.
+0. **Repo boundary (standing rule)** — cxt_hub and kiln-os are company repos: never connected to, cloned, or edited from this project. Only the Project Sartre repo and files are touchable. Source material arrives as local read-only folder copies.
+1. **Source material drop** — Sean to re-download reference copies of cxt_hub, kiln-os, and the Hologram/InEight workspaces for one-way extraction.
 2. **Naming** — "Project Sartre" is the codename; decide the client-facing product name before Phase 4.
 3. **Resourcing** — who builds (Sean + Claude Code, plus which internal engineers), and what the weekly build cadence is.
 4. **Taxonomy sign-off** — the merged module map (§4) needs a yes from Services leadership since it replaces three existing track taxonomies.

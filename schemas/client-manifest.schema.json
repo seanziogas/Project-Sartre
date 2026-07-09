@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sartre://schemas/client-manifest",
+  "title": "Sartre Client Manifest (client.yaml)",
+  "description": "Per-instance configuration: tools, modules, thresholds, policies, channels, budgets, MVD status. Config over code — anything that varies per client lives here or in the brain.",
+  "type": "object",
+  "required": ["client", "status", "stack", "modules", "policies", "delivery", "budgets"],
+  "additionalProperties": false,
+  "properties": {
+    "client": {
+      "type": "object",
+      "required": ["name", "engagement_start"],
+      "properties": {
+        "name": { "type": "string" },
+        "engagement_start": { "type": "string", "format": "date" },
+        "engagement_end": { "type": ["string", "null"], "format": "date" },
+        "pod": {
+          "type": "object",
+          "properties": {
+            "md": { "type": "string" },
+            "gtme": { "type": "string" },
+            "tos": { "type": "string" }
+          }
+        }
+      }
+    },
+    "status": { "enum": ["onboarding", "active", "paused", "archived"] },
+    "stack": {
+      "description": "Tools in the client's stack, keyed by role. Connector config lives in the named connector's own config; this declares what exists.",
+      "type": "object",
+      "properties": {
+        "crm": { "enum": ["salesforce", "hubspot", "attio", null] },
+        "enrichment": { "type": "array", "items": { "type": "string" }, "description": "e.g. clay" },
+        "sequencers": { "type": "array", "items": { "type": "string" } },
+        "comms": { "type": "array", "items": { "enum": ["slack", "teams", "email"] } },
+        "meetings": { "type": "array", "items": { "type": "string" }, "description": "e.g. fathom, gong" },
+        "intent": { "type": "array", "items": { "type": "string" } },
+        "warehouse": { "type": "array", "items": { "type": "string" } },
+        "inbound": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "modules": {
+      "description": "Canonical module IDs (docs/taxonomy.md) mapped to per-module config. Enabling a module requires its MVD gate green unless override_mvd is set with a reason.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^(sales|marketing|revops|platform)\\.[a-z-]+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["enabled"],
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "always_on": { "type": "boolean", "default": false },
+          "schedule": { "type": "string", "description": "cron expression for scheduled modules" },
+          "thresholds": {
+            "type": "object",
+            "description": "Module-specific tunables (score cutoffs, routing splits, batch sizes). Layer 8 weekly tuning proposes diffs here.",
+            "additionalProperties": true
+          },
+          "override_mvd": {
+            "type": "object",
+            "required": ["reason", "approved_by"],
+            "properties": {
+              "reason": { "type": "string" },
+              "approved_by": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "required": ["approval"],
+      "properties": {
+        "approval": {
+          "description": "Human-gate policy per output class. block = queue until approved (default for anything outward-facing); notify = proceed and inform; auto = no gate (internal-only outputs).",
+          "type": "object",
+          "propertyNames": { "enum": ["outbound_send", "crm_write", "client_comms", "brain_change", "internal_report"] },
+          "additionalProperties": { "enum": ["block", "notify", "auto"] }
+        },
+        "learning": {
+          "type": "object",
+          "properties": {
+            "capture": { "type": "boolean", "default": true },
+            "exemplar_memory": { "type": "boolean", "default": true },
+            "weekly_tuning": { "type": "boolean", "default": false },
+            "outcome_optimization": { "type": "boolean", "default": false }
+          }
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "flag_dont_delete": { "const": true, "description": "Non-negotiable; present so it is visible, not so it is configurable." },
+            "snapshot_before_write": { "const": true },
+            "reenrichment_window_days": { "type": "integer", "default": 90 },
+            "namespaced_field_prefix": { "type": "string", "description": "CRM field namespace, e.g. Clay_ or Kiln_" }
+          }
+        }
+      }
+    },
+    "delivery": {
+      "description": "Where outputs land (Design Principle 6).",
+      "type": "object",
+      "properties": {
+        "channels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": { "enum": ["slack", "teams", "email", "notion", "crm"] },
+              "target": { "type": "string", "description": "channel id / address / page" },
+              "outputs": { "type": "array", "items": { "type": "string" }, "description": "which output kinds route here (digests, review-queues, reports)" }
+            }
+          }
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "properties": {
+        "clay_credits_monthly": { "type": ["integer", "null"] },
+        "token_budget_monthly_usd": { "type": ["number", "null"] },
+        "per_run_defaults": {
+          "type": "object",
+          "properties": {
+            "max_clay_credits": { "type": ["integer", "null"] },
+            "max_tokens_usd": { "type": ["number", "null"] }
+          }
+        }
+      }
+    },
+    "mvd": {
+      "description": "Minimum-viable-data status per module, written by the Day-1 Data Audit and refreshed by quality monitoring. Read-only for humans — remediation changes the data, not this block.",
+      "type": "object",
+      "propertyNames": { "pattern": "^(sales|marketing|revops|platform)\\.[a-z-]+$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status", "as_of"],
+        "properties": {
+          "status": { "enum": ["green", "yellow", "red", "unknown"] },
+          "as_of": { "type": "string", "format": "date" },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["field", "coverage", "required"],
+              "properties": {
+                "field": { "type": "string" },
+                "coverage": { "type": "number" },
+                "required": { "type": "number" },
+                "remediation_credits": { "type": ["integer", "null"] }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

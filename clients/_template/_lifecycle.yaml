@@ -1,0 +1,21 @@
+# Client Lifecycle Metadata (kiln-os convention, imported)
+# status is the authoritative lifecycle source of truth.
+
+status: active # active | archived
+client_name: "[Client Name]"
+
+# Engagement timeline
+engagement_start: "YYYY-MM-DD"
+engagement_end: null
+archived_date: null
+
+# Engagement summary (filled at archival)
+engagement_type: ""
+key_deliverables: []
+completion_reason: ""
+
+# Knowledge extraction (filled at archival)
+patterns_extracted: false
+knowledge_base_refs: []
+
+notes: ""

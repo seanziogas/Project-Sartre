@@ -22,11 +22,24 @@ Purpose: lets any new Claude Code session (or teammate) in this repo pick up wit
 
 ## Open items (mirror of PLAN.md §10)
 
-- Sean to drop read-only reference copies of the source repos for Phase 0 extraction.
+- ~~Source material drop~~ Done 2026-07-09: read-only copies at `/Users/sean/Documents/Internal Repo's/{cxt_hub-main, kiln-os-main}`. The Hologram/InEight workspaces live INSIDE `cxt_hub-main/clients/`. All three were deep-surveyed 2026-07-09; findings encoded in `docs/` and `schemas/` (see Phase 0 status below).
 - ~~GitHub push~~ Done 2026-07-09: `gh auth login` completed, `main` pushed to https://github.com/seanziogas/Project-Sartre and tracking `origin/main`.
 - ~~Git identity~~ Done 2026-07-09: repo-local `user.email` set to `sean.ziogas@2x.marketing` (global config untouched).
 - Naming: "Project Sartre" is the codename; client-facing name TBD before Phase 4.
-- Resourcing + taxonomy sign-off from Services leadership (the merged module map replaces three older track taxonomies).
+- Resourcing + **taxonomy sign-off from Services leadership** — the canonical module taxonomy is now drafted at `docs/taxonomy.md` (found FOUR competing taxonomies upstream, not three; also flags a $100M+ vs $10M–$500M ICP conflict in cxt_hub).
+
+## Phase 0 status (as of 2026-07-09)
+
+Built from the source-material survey:
+- `docs/architecture/repo-layout.md` — monorepo layout (packages/ scaffolding deferred to Phase 1).
+- `docs/taxonomy.md` — canonical module IDs (`sales.* marketing.* revops.* platform.*`); key design: modules are identity, SOW track letters stay free-form sequencing. DRAFT pending Services sign-off.
+- `docs/architecture/memory-layer.md` — kiln-os conventions import spec (near-wholesale; deltas table in §3).
+- `docs/architecture/skill-patterns.md` — the five proven execution patterns extracted from Hologram/InEight/Drata (classifier+adversarial-reviewer, shortlist→scoped-LLM→gates, deterministic campaign factory, codified routing, exclusion-as-budget-control).
+- `schemas/brain/README.md` — Brain schema v0.1; `schemas/client-manifest.schema.json` — client.yaml JSON Schema.
+- `clients/_template/` — full instance template (client.yaml, _lifecycle.yaml, brain stubs, memory dirs).
+- `knowledge_base/` — imported: 4 playbooks, 4 delivery docs, 6 sales docs (both ICPs, conflict flagged), pod structure, 11 kiln-os patterns/frameworks + extraction rubric. All with provenance headers.
+
+Remaining in Phase 0: taxonomy sign-off (human), then Phase 1 kickoff (connectors + data foundation + first three skills).
 
 ## Useful research already done (don't redo)
 

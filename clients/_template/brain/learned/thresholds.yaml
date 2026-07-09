@@ -1,0 +1,9 @@
+# Tuned thresholds proposed by Layer-8 weekly tuning and approved by the GTME.
+# Every entry carries provenance. Empty until learning proposes something.
+# Example:
+# revops.routing.revenue_split_usd:
+#   value: 100000000
+#   proposed: 2026-08-14
+#   evidence: "14 routing overrides near the $100M threshold in 30 days"
+#   approved_by: ""
+{}

@@ -1,0 +1,71 @@
+# Sartre instance manifest — validated against schemas/client-manifest.schema.json
+# Copy this directory to clients/<Client Name>/ during Onboarding Week.
+
+client:
+  name: "[Client Name]"
+  engagement_start: "YYYY-MM-DD"
+  engagement_end: null
+  pod:
+    md: ""
+    gtme: ""
+    tos: ""
+
+status: onboarding # onboarding | active | paused | archived
+
+stack:
+  crm: null # salesforce | hubspot | attio
+  enrichment: [clay]
+  sequencers: []
+  comms: [slack]
+  meetings: [fathom]
+  intent: []
+  warehouse: []
+  inbound: []
+
+# Canonical module IDs — see docs/taxonomy.md. Enable requires green MVD (or explicit override).
+modules:
+  revops.enrichment:
+    enabled: false
+    always_on: true # hygiene runs on schedule once shipped
+    schedule: "0 6 * * 1"
+    thresholds: {}
+  platform.metrics:
+    enabled: true # baseline→delta reporting on from day one
+    always_on: true
+  platform.learning:
+    enabled: true # feedback-event capture is always on; tuning speeds opt in below
+    always_on: true
+
+policies:
+  approval:
+    outbound_send: block # every outward-facing output stops in a review queue
+    crm_write: block
+    client_comms: block
+    brain_change: block # includes Layer-8 proposed diffs
+    internal_report: auto
+  learning:
+    capture: true
+    exemplar_memory: true
+    weekly_tuning: false # turn on in Phase 3
+    outcome_optimization: false # turn on in Phase 4
+  data:
+    flag_dont_delete: true
+    snapshot_before_write: true
+    reenrichment_window_days: 90
+    namespaced_field_prefix: "Kiln_"
+
+delivery:
+  channels:
+    - type: slack
+      target: "" # client channel id
+      outputs: [digests, reports]
+
+budgets:
+  clay_credits_monthly: null
+  token_budget_monthly_usd: null
+  per_run_defaults:
+    max_clay_credits: null
+    max_tokens_usd: null
+
+# Written by the Day-1 Data Audit; refreshed by platform.quality. Do not hand-edit.
+mvd: {}

@@ -1,3 +1,6 @@
 export * from './exemplars.js'
 export * from './tuning.js'
 export * from './metrics.js'
+export * from './bandit.js'
+export * from './recalibration.js'
+export * from './engagement-report.js'

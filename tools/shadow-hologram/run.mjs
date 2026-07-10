@@ -3,14 +3,17 @@
 // the shadow report. THE go/no-go validation artifact.
 //
 // Usage:
-//   node tools/shadow-hologram/run.mjs             # all rows, live model
+//   node tools/shadow-hologram/run.mjs --cli       # live via Claude Code CLI (subscription auth, no API key)
+//   node tools/shadow-hologram/run.mjs             # live via Anthropic SDK (needs ANTHROPIC_API_KEY / ant profile)
 //   node tools/shadow-hologram/run.mjs --sample 20 # first N rows
-//   node tools/shadow-hologram/run.mjs --fake      # plumbing check, no API
+//   node tools/shadow-hologram/run.mjs --fake      # plumbing check, no model
 //
-// Requires fixtures (node tools/shadow-hologram/build-fixtures.mjs) and, for
-// live runs, SDK-resolvable credentials (ANTHROPIC_API_KEY or `ant auth login`).
-import { readFile, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+// --cli is the proven Hologram pattern (classify_accounts.py): shell out to
+// `claude -p` — Claude Code subscription auth, no API key required.
+import { spawn } from 'node:child_process'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const FIX = resolve(ROOT, 'shadow-runs/hologram')
@@ -19,6 +22,7 @@ const { compareGrades, shadowReport, scoreToBand } = await import(`${ROOT}/packa
 
 const args = process.argv.slice(2)
 const fake = args.includes('--fake')
+const useCli = args.includes('--cli')
 const sampleIdx = args.indexOf('--sample')
 const sample = sampleIdx >= 0 ? parseInt(args[sampleIdx + 1], 10) : null
 
@@ -47,9 +51,11 @@ const config = {
 
 const llm = fake
   ? { complete: async ({ user }) => fakeResponse(user) }
-  : new AnthropicLlmClient('claude-opus-4-8')
+  : useCli
+    ? await makeCliClient('claude-opus-4-8')
+    : new AnthropicLlmClient('claude-opus-4-8')
 
-console.log(`grading ${rows.length} rows (${fake ? 'FAKE' : 'live claude-opus-4-8'})...`)
+console.log(`grading ${rows.length} rows (${fake ? 'FAKE' : useCli ? 'live via Claude Code CLI' : 'live via SDK'}, claude-opus-4-8)...`)
 const started = Date.now()
 const result = await listGrader.gradeList(rows, config, llm, (done, total) =>
   console.log(`  batch ${done}/${total} (${Math.round((Date.now() - started) / 1000)}s)`),
@@ -70,6 +76,47 @@ await writeFile(`${FIX}/machine-grades.json`, JSON.stringify(result, null, 2))
 await writeFile(`${FIX}/report.md`, report)
 console.log('\n' + report)
 console.log(`\nwritten: shadow-runs/hologram/report.md + machine-grades.json`)
+
+// Claude Code CLI client — subscription auth, no API key. System prompt via
+// temp file (93KB exceeds comfortable argv), user payload via stdin.
+async function makeCliClient(model) {
+  const dir = await mkdtemp(join(tmpdir(), 'shadow-'))
+  const systemFiles = new Map()
+  let n = 0
+  return {
+    complete: async ({ system, user }) => {
+      let file = systemFiles.get(system)
+      if (!file) {
+        file = join(dir, `system-${systemFiles.size}.md`)
+        await writeFile(file, system)
+        systemFiles.set(system, file)
+      }
+      n++
+      const started = Date.now()
+      const out = await new Promise((resolvePromise, reject) => {
+        const child = spawn(
+          'claude',
+          ['-p', '--model', model, '--system-prompt-file', file, '--exclude-dynamic-system-prompt-sections'],
+          { stdio: ['pipe', 'pipe', 'pipe'] },
+        )
+        let stdout = ''
+        let stderr = ''
+        const timer = setTimeout(() => { child.kill(); reject(new Error('CLI call timed out after 10 min')) }, 600_000)
+        child.stdout.on('data', (d) => (stdout += d))
+        child.stderr.on('data', (d) => (stderr += d))
+        child.on('close', (code) => {
+          clearTimeout(timer)
+          if (code === 0) resolvePromise(stdout)
+          else reject(new Error(`claude CLI exited ${code}: ${stderr.slice(0, 300)}`))
+        })
+        child.stdin.write(user)
+        child.stdin.end()
+      })
+      console.log(`    cli call ${n} done (${Math.round((Date.now() - started) / 1000)}s)`)
+      return out
+    },
+  }
+}
 
 // --fake: deterministic plausible responses so the plumbing is verifiable without credentials
 function fakeResponse(user) {

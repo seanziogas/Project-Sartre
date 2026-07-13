@@ -5,6 +5,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { parseManifest } from '@sartre/core'
 import type { Account } from '@sartre/core'
 import { EnrichmentCache } from '@sartre/connectors'
+import { mapSourceRow } from '@sartre/data'
 import { PipelineEngine, Runner, MapRegistry } from '@sartre/pipelines'
 import type { PipelineDefinition } from '@sartre/pipelines'
 import {
@@ -201,6 +202,40 @@ describe('PostgresCanonicalStore (against PGlite)', () => {
     const collision = accountRecord('Acme', '00000000-0000-4000-8000-000000000102', '001-acme')
     await expect(store.put('Acme', 'account', collision)).rejects.toThrow('already belongs')
   })
+
+  it('persists promoted candidates and returns canonical audit views', async () => {
+    const store = new PostgresCanonicalStore(db)
+    const candidate = (externalId: string, name: string) => mapSourceRow(
+      { Id: externalId, Name: name, Website: 'durable.example', OwnerId: 'rep-1', LastModified: '2026-06-01T00:00:00Z' },
+      {
+        object: 'account',
+        externalIdField: 'Id',
+        fields: [
+          { source: 'Name', target: 'name', transform: 'trim' },
+          { source: 'Website', target: 'domain', transform: 'domain' },
+          { source: 'OwnerId', target: 'ownerRef', transform: 'trim' },
+          { source: 'LastModified', target: 'sourceUpdatedAt', transform: 'datetime' },
+        ],
+      },
+      { clientId: 'DurableClient', connectorId: 'hubspot', extractedAt: '2026-07-13T12:00:00Z' },
+    )
+    const ids = [
+      '00000000-0000-4000-8000-000000000301',
+      '00000000-0000-4000-8000-000000000302',
+    ]
+    const promoted = await store.promoteAccounts(
+      'DurableClient',
+      [candidate('company-1', 'Durable One'), candidate('company-2', 'Durable Two')],
+      { now: () => new Date('2026-07-13T13:00:00Z'), createId: () => ids.shift()! },
+    )
+    const audit = await store.auditRows('DurableClient')
+
+    expect(promoted.records).toHaveLength(2)
+    expect(promoted.records.every((record) => record.flags.includes('duplicate'))).toBe(true)
+    expect(audit.accounts).toHaveLength(2)
+    expect(audit.accounts[0]).toMatchObject({ domain: 'durable.example', ownerRef: 'rep-1' })
+    expect(audit.contacts).toEqual([])
+  })
 })
 
 function accountRecord(clientId: string, id: string, externalId: string): Account {
@@ -230,6 +265,8 @@ function accountRecord(clientId: string, id: string, externalId: string): Accoun
     parentCompanyName: field(null),
     parentCompanyRevenueUsd: field(null),
     accountType: field('prospect'),
+    ownerRef: field('rep-1'),
+    sourceUpdatedAt: field('2026-07-01T00:00:00Z'),
     icpScore: field(null),
     icpGrade: field(null),
   }

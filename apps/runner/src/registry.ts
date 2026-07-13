@@ -12,8 +12,11 @@ import { MapRegistry } from '@sartre/pipelines'
 import type { LlmClient } from '@sartre/skills'
 
 /** Deployment-owned adapters and brain-derived configuration for each module. */
+export type RunnerEnrichmentDeps = EnrichmentRefreshDeps
+  & Required<Pick<EnrichmentRefreshDeps, 'refreshCanonical'>>
+
 export interface RunnerModuleDeps {
-  enrichment(clientId: string): EnrichmentRefreshDeps | Promise<EnrichmentRefreshDeps>
+  enrichment(clientId: string): RunnerEnrichmentDeps | Promise<RunnerEnrichmentDeps>
   /** The runner injects the production LLM; deployments cannot replace it. */
   reactivation(clientId: string): Omit<ReactivationDeps, 'llm'> | Promise<Omit<ReactivationDeps, 'llm'>>
   inbound(clientId: string): InboundRoutingDeps | Promise<InboundRoutingDeps>

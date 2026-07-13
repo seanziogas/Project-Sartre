@@ -22,6 +22,8 @@ describe('source-to-canonical mapping', () => {
     expect(candidate).toMatchObject({
       object: 'account',
       clientId: 'Acme',
+      connectorId: 'salesforce',
+      observedAt: '2026-07-13T12:00:00Z',
       externalIds: { salesforce: '001-acme' },
       fields: {
         name: { value: 'Acme, Inc.', provenance: { source: 'crm', origin: 'salesforce', runId: 'run-1' } },

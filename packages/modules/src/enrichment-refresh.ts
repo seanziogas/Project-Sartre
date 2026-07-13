@@ -20,9 +20,11 @@ import type { ClientDeps } from './client-deps.js'
  */
 
 export interface EnrichmentRefreshDeps {
-  /** Adapted from the CRM connector's staged rows (mock or live). */
-  pullAccounts(): Promise<AuditAccountRow[]>
-  pullContacts(): Promise<AuditContactRow[]>
+  /** Legacy/direct audit views; production should prefer refreshCanonical. */
+  pullAccounts?(): Promise<AuditAccountRow[]>
+  pullContacts?(): Promise<AuditContactRow[]>
+  /** Stage → map → promote, then return canonical account/contact audit views. */
+  refreshCanonical?(): Promise<{ accounts: AuditAccountRow[]; contacts: AuditContactRow[] }>
   loadPreviousReport(clientId: string): Promise<DataHealthReport | null>
   saveReport(clientId: string, report: DataHealthReport): Promise<void>
   /** Written into the manifest's mvd block (machine-owned). */
@@ -46,6 +48,10 @@ export function buildEnrichmentRefreshPipeline(source: ClientDeps<EnrichmentRefr
         id: 'pull',
         run: async (ctx) => {
           const deps = await resolveClientDeps(source, ctx.clientId)
+          if (deps.refreshCanonical) return deps.refreshCanonical()
+          if (!deps.pullAccounts || !deps.pullContacts) {
+            throw new Error('enrichment refresh requires refreshCanonical or both direct pull functions')
+          }
           const [accounts, contacts] = await Promise.all([deps.pullAccounts(), deps.pullContacts()])
           return { accounts, contacts }
         },

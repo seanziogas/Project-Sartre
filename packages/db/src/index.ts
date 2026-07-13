@@ -10,6 +10,14 @@ import type {
 } from '@sartre/core'
 import { StagedBatchSchema } from '@sartre/connectors'
 import type { CacheEntry, CacheStore, StagedBatch } from '@sartre/connectors'
+import { canonicalAuditRows, promoteAccountCandidates, promoteContactCandidates } from '@sartre/data'
+import type {
+  AuditAccountRow,
+  AuditContactRow,
+  CanonicalCandidate,
+  PromotionOptions,
+  PromotionResult,
+} from '@sartre/data'
 import { applyGateDecision } from '@sartre/pipelines'
 import type { GateDecisionInput, RunnerStore, RunRecord, RunStatus } from '@sartre/pipelines'
 import { Pool } from 'pg'
@@ -251,6 +259,50 @@ export class PostgresCanonicalStore {
       [clientId, recordType, limit],
     )
     return rows.map((row) => parseCanonical(recordType, (row as { doc: unknown }).doc))
+  }
+
+  async listAll(clientId: string, recordType: CanonicalRecordType): Promise<CanonicalRecord[]> {
+    assertClientId(clientId)
+    const { rows } = await this.db.query(
+      `SELECT doc FROM canonical_records
+       WHERE client_id = $1 AND record_type = $2
+       ORDER BY updated_at DESC`,
+      [clientId, recordType],
+    )
+    return rows.map((row) => parseCanonical(recordType, (row as { doc: unknown }).doc))
+  }
+
+  async promoteAccounts(
+    clientId: string,
+    candidates: CanonicalCandidate[],
+    options: PromotionOptions = {},
+  ): Promise<PromotionResult<AccountType>> {
+    const existing = await this.listAll(clientId, 'account') as AccountType[]
+    const result = promoteAccountCandidates(clientId, candidates, existing, options)
+    for (const record of result.changedRecords) await this.put(clientId, 'account', record)
+    return result
+  }
+
+  async promoteContacts(
+    clientId: string,
+    candidates: CanonicalCandidate[],
+    options: PromotionOptions = {},
+  ): Promise<PromotionResult<ContactType>> {
+    const [existing, accounts] = await Promise.all([
+      this.listAll(clientId, 'contact') as Promise<ContactType[]>,
+      this.listAll(clientId, 'account') as Promise<AccountType[]>,
+    ])
+    const result = promoteContactCandidates(clientId, candidates, existing, accounts, options)
+    for (const record of result.changedRecords) await this.put(clientId, 'contact', record)
+    return result
+  }
+
+  async auditRows(clientId: string): Promise<{ accounts: AuditAccountRow[]; contacts: AuditContactRow[] }> {
+    const [accounts, contacts] = await Promise.all([
+      this.listAll(clientId, 'account') as Promise<AccountType[]>,
+      this.listAll(clientId, 'contact') as Promise<ContactType[]>,
+    ])
+    return canonicalAuditRows(accounts, contacts)
   }
 }
 

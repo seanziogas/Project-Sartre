@@ -43,6 +43,8 @@ export const Account = z.object({
   parentCompanyName: pstr, // text only — never auto-create a parent record
   parentCompanyRevenueUsd: pnum, // routing uses parent, enrichment uses subsidiary
   accountType: pstr, // customer | prospect | competitor | partner | ... (client picklist)
+  ownerRef: pstr, // CRM owner (data audit + routing integrity checks read this)
+  sourceUpdatedAt: pstr, // source-system last-modified timestamp; distinct from canonical updatedAt
   icpScore: pnum,
   icpGrade: pstr,
 })
@@ -61,6 +63,7 @@ export const Contact = z.object({
   employmentStatus: pstr, // Current | Former | Unrelated (employment-validation standard)
   doNotContact: z.boolean().default(false),
   ownerRef: pstr, // CRM owner (routing integrity checks read this)
+  sourceUpdatedAt: pstr, // source-system last-modified timestamp for staleness audits
 })
 export type Contact = z.infer<typeof Contact>
 

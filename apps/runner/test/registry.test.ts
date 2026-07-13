@@ -14,6 +14,7 @@ function moduleDeps(): RunnerModuleDeps {
   const enrichment = {
     pullAccounts: async () => [],
     pullContacts: async () => [],
+    refreshCanonical: async () => ({ accounts: [], contacts: [] }),
     loadPreviousReport: async () => null,
     saveReport: async () => undefined,
     saveMvd: async () => undefined,

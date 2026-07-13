@@ -17,6 +17,7 @@ const Transform = z.enum([
   'lowercase',
   'number',
   'boolean',
+  'datetime',
   'domain',
   'email',
   'linkedin',
@@ -38,11 +39,11 @@ const TARGETS: Record<SourceObject, Set<string>> = {
   account: new Set([
     'name', 'domain', 'industry', 'employeeCount', 'revenueUsd', 'revenueTier',
     'country', 'state', 'linkedinUrl', 'parentCompanyName', 'parentCompanyRevenueUsd',
-    'accountType', 'icpScore', 'icpGrade',
+    'accountType', 'ownerRef', 'sourceUpdatedAt', 'icpScore', 'icpGrade',
   ]),
   contact: new Set([
     'accountId', 'firstName', 'lastName', 'email', 'title', 'seniority',
-    'linkedinUrl', 'country', 'employmentStatus', 'doNotContact', 'ownerRef',
+    'linkedinUrl', 'country', 'employmentStatus', 'doNotContact', 'ownerRef', 'sourceUpdatedAt',
   ]),
   opportunity: new Set([
     'accountId', 'name', 'stage', 'amountUsd', 'closeDate', 'isClosed', 'isWon', 'lossReason',
@@ -54,6 +55,8 @@ const TARGETS: Record<SourceObject, Set<string>> = {
 
 export interface CanonicalCandidate {
   clientId: string
+  connectorId: string
+  observedAt: string
   object: SourceObject
   externalIds: Record<string, string>
   fields: Record<string, { value: string | number | boolean | null; provenance: ProvenanceType }>
@@ -114,6 +117,8 @@ export function mapSourceRow(
 
   return {
     clientId: context.clientId,
+    connectorId: context.connectorId,
+    observedAt: context.extractedAt,
     object: mapping.object,
     externalIds: externalId === null ? {} : { [context.connectorId]: externalId },
     fields,
@@ -153,6 +158,13 @@ function transform(value: unknown, kind: z.infer<typeof Transform>): TransformRe
         return { ok: true, value: ['true', '1'].includes(value.trim().toLowerCase()) }
       }
       return { ok: false, problem: 'expected a boolean' }
+    case 'datetime': {
+      if (typeof value !== 'string' && typeof value !== 'number') return { ok: false, problem: 'expected a timestamp' }
+      const date = new Date(value)
+      return Number.isNaN(date.getTime())
+        ? { ok: false, problem: 'invalid timestamp' }
+        : { ok: true, value: date.toISOString() }
+    }
     case 'domain':
       if (typeof value !== 'string') return { ok: false, problem: 'expected a domain string' }
       return normalized(normalizeDomain(value), 'invalid domain')

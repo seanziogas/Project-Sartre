@@ -8,4 +8,6 @@ Layer 7 uses three explicit boundaries; connectors never write directly into gol
 
 Both storage tables promote `client_id` to an indexed column. All adapter reads require it, and record writes reject a document whose embedded client differs from the storage scope. Dynamic source mappings belong in an active, attributed `brain/config/*.yaml` envelope and can be loaded through `FileClientBrainStore`.
 
+`PostgresCanonicalStore.promoteAccounts/promoteContacts` apply this promotion flow against the durable client dataset and persist every changed or newly duplicate-flagged record. Its `auditRows` projection feeds the enrichment-refresh pipeline through `refreshCanonical`, so the Day-1 audit reads canonical data rather than bypassing staging and provenance.
+
 CRM writeback remains a separate connector operation: it must pass the namespaced-field guard, create a source snapshot, and stop at a human `crm_write` gate before dispatch.

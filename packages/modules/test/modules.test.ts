@@ -76,6 +76,35 @@ describe('enrichment-refresh pipeline (Day-1 Audit + always-on hygiene)', () => 
     expect(notifications).toHaveLength(1)
     expect(notifications[0]).toContain('DRIFT')
   })
+
+  it('audits the canonical refresh view instead of bypassing promotion', async () => {
+    let directPulls = 0
+    const pipeline = buildEnrichmentRefreshPipeline({
+      pullAccounts: async () => { directPulls++; return [] },
+      pullContacts: async () => { directPulls++; return [] },
+      refreshCanonical: async () => ({
+        accounts: [{
+          id: 'canonical-a1',
+          name: 'Canonical Co',
+          domain: 'canonical.co',
+          ownerRef: 'rep-1',
+          updatedAt: '2026-07-01T00:00:00Z',
+          linkedinUrl: null,
+        }],
+        contacts: [],
+      }),
+      loadPreviousReport: async () => null,
+      saveReport: async () => undefined,
+      saveMvd: async () => undefined,
+      notify: async () => undefined,
+      now: NOW,
+    })
+    const run = await new PipelineEngine(new MemoryRunStore(), { now: NOW, runId: 'canonical-audit-r1' })
+      .start(pipeline, parseManifest(readFileSync(templatePath, 'utf8')), 'Acme')
+
+    expect(directPulls).toBe(0)
+    expect((run.checkpoints.audit as DataHealthReport).counts).toEqual({ accounts: 1, contacts: 0 })
+  })
 })
 
 describe('closed-lost reactivation pipeline', () => {

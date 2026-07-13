@@ -38,7 +38,10 @@ export async function loadModuleDeps(
 function assertModuleDeps(value: unknown): asserts value is RunnerModuleDeps {
   if (!value || typeof value !== 'object') throw new Error('createModuleDeps must return an object')
   const record = value as Record<string, unknown>
-  for (const key of ['enrichment', 'reactivation', 'inbound', 'remediation', 'copilotBriefs', 'dedup', 'leadConvert', 'deanon']) {
+  for (const key of [
+    'enrichment', 'reactivation', 'inbound', 'remediation', 'copilotBriefs',
+    'dedup', 'leadConvert', 'deanon', 'learning', 'quality',
+  ]) {
     const section = record[key]
     if (typeof section !== 'function') {
       throw new Error(`createModuleDeps result must provide a per-client ${key}(clientId) resolver`)

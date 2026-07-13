@@ -17,6 +17,8 @@ import {
   buildDedupReviewPipeline,
   buildLeadConvertPipeline,
   buildDeanonPipeline,
+  buildLearningLoopPipeline,
+  buildQualityMonitorPipeline,
 } from '../src/index.js'
 
 const templatePath = resolve(import.meta.dirname, '../../../clients/_template/client.yaml')
@@ -576,6 +578,134 @@ describe('website de-anonymization pipeline', () => {
     expect(done.status).toBe('completed')
     expect(persistenceCalls).toBe(0)
     expect(done.checkpoints.persist).toEqual({ persisted: 0, reviewed: 0 })
+  })
+})
+
+describe('learning loop pipeline (speeds 1–2)', () => {
+  const override = (index: number, reason?: string) => ({
+    kind: 'human_action' as const,
+    id: `00000000-0000-4000-8000-${String(9000 + index).padStart(12, '0')}`,
+    clientId: 'Acme',
+    occurredAt: '2026-07-09T10:00:00Z',
+    actor: 'gtme@kiln',
+    action: 'grade_override' as const,
+    machine: { skillId: 'list-grader@0.1.0', runId: 'grade-r1', itemRef: `account-${index}`, output: { score: 40, labels: { industry: 'Fleet' } } },
+    humanOutput: { score: 65 },
+    ...(reason ? { reason } : {}),
+    surface: 'review_queue' as const,
+  })
+
+  it('eval-gates proposals, gates draft brain artifacts, and persists only after approval', async () => {
+    const persisted: unknown[][] = []
+    let evalCalls = 0
+    const events = Array.from({ length: 8 }, (_, index) => override(index, index === 0 ? 'Fleet operators need a higher fit floor' : undefined))
+    const pipeline = buildLearningLoopPipeline({
+      loadFeedback: async () => events,
+      evaluateProposal: async () => { evalCalls++; return { pass: true, detail: 'known-answer evals pass' } },
+      persistDrafts: async (_clientId, drafts) => { persisted.push(drafts); return drafts.length },
+      now: NOW,
+    })
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'learning-r1' })
+    const m = manifest('platform.learning', (value) => { value.policies.learning.weekly_tuning = true })
+
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: 'review:brain_change', status: 'pending' })
+    const payload = parked.gates[0]!.payload as { drafts: { kind: string; content: string }[]; metricsOnlyCorrections: number }
+    expect(payload.drafts.map((draft) => draft.kind)).toEqual(['exemplar', 'tuning_report'])
+    expect(payload.drafts[0]!.content).toContain('status: draft')
+    expect(payload.drafts[1]!.content).toContain('approved_by: ""')
+    expect(payload.metricsOnlyCorrections).toBe(7)
+    expect(evalCalls).toBeGreaterThan(0)
+    expect(persisted).toHaveLength(0)
+
+    const done = await engine.resolveGate(pipeline, 'learning-r1', 'review:brain_change', 'approved', 'gtme@kiln', m)
+    expect(done.status).toBe('completed')
+    expect(persisted).toHaveLength(1)
+    expect(done.checkpoints.persist).toEqual({ persisted: 2, drafts: 2 })
+  })
+
+  it('never surfaces an eval-regressing tuning proposal as a brain change', async () => {
+    let persistenceCalls = 0
+    const pipeline = buildLearningLoopPipeline({
+      loadFeedback: async () => Array.from({ length: 8 }, (_, index) => override(index)),
+      evaluateProposal: async () => ({ pass: false, detail: 'known-answer regression' }),
+      persistDrafts: async () => { persistenceCalls++; return 0 },
+      now: NOW,
+    })
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'learning-failed-eval-r1' })
+    const m = manifest('platform.learning', (value) => { value.policies.learning.weekly_tuning = true })
+    const parked = await engine.start(pipeline, m, 'Acme')
+
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: 'review:internal_report', status: 'pending' })
+    expect((parked.gates[0]!.payload as { drafts: unknown[] }).drafts).toEqual([])
+    const done = await engine.resolveGate(pipeline, 'learning-failed-eval-r1', 'review:internal_report', 'approved', 'gtme@kiln', m)
+    expect(done.status).toBe('completed')
+    expect(persistenceCalls).toBe(0)
+  })
+})
+
+describe('continuous quality pipeline', () => {
+  const accountRow = (id: string, domain: string | null) => ({
+    id, name: `Account ${id}`, domain, ownerRef: 'rep', updatedAt: '2026-07-01T00:00:00Z', linkedinUrl: null,
+  })
+  const contactRow = (id: string, accountRef: string | null) => ({
+    id, firstName: 'A', lastName: id, email: `${id}@acme.example`, linkedinUrl: null,
+    companyName: 'Acme', accountRef, ownerRef: 'rep', updatedAt: '2026-07-01T00:00:00Z',
+  })
+  const previous = runDataAudit(
+    [accountRow('a1', 'one.example'), accountRow('a2', 'two.example')],
+    [contactRow('c1', 'a1'), contactRow('c2', 'a2')],
+    { now: NOW() },
+  )
+  const current = runDataAudit(
+    [accountRow('a1', 'one.example'), accountRow('a2', null)],
+    [contactRow('c1', 'a1'), contactRow('c2', null)],
+    { now: NOW() },
+  )
+
+  it('refreshes machine-owned MVD, gates alerts, and notifies only after approval', async () => {
+    const saved: Record<string, MvdStatus>[] = []
+    const notifications: string[] = []
+    const pipeline = buildQualityMonitorPipeline({
+      loadReports: async () => ({ current, previous }),
+      saveMvd: async (_clientId, mvd) => { saved.push(mvd) },
+      notify: async (_clientId, subject, body) => { notifications.push(`${subject}\n${body}`) },
+    })
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'quality-r1' })
+    const m = manifest('platform.quality', (value) => {
+      value.modules['revops.tam'] = { enabled: true, always_on: false, thresholds: {} }
+    })
+    const parked = await engine.start(pipeline, m, 'Acme')
+
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: 'review:client_comms', status: 'pending' })
+    expect(saved).toHaveLength(1)
+    expect(saved[0]!['revops.tam']!.status).toBe('red')
+    expect(notifications).toHaveLength(0)
+    const done = await engine.resolveGate(pipeline, 'quality-r1', 'review:client_comms', 'approved', 'gtme@kiln', m)
+    expect(done.status).toBe('completed')
+    expect(saved).toHaveLength(1)
+    expect(notifications).toHaveLength(1)
+    expect(notifications[0]).toContain('DRIFT [critical]')
+  })
+
+  it('completes silently when contracts and health are stable', async () => {
+    let notifications = 0
+    const pipeline = buildQualityMonitorPipeline({
+      loadReports: async () => ({ current: previous, previous }),
+      saveMvd: async () => undefined,
+      notify: async () => { notifications++ },
+    })
+    const done = await new PipelineEngine(new MemoryRunStore(), { now: NOW })
+      .start(pipeline, manifest('platform.quality'), 'Acme')
+    expect(done.status).toBe('completed')
+    expect(done.gates).toEqual([])
+    expect(notifications).toBe(0)
   })
 })
 

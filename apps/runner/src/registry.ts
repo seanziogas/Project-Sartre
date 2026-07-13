@@ -7,12 +7,16 @@ import {
   buildDedupReviewPipeline,
   buildLeadConvertPipeline,
   buildDeanonPipeline,
+  buildLearningLoopPipeline,
+  buildQualityMonitorPipeline,
 } from '@sartre/modules'
 import type {
   CopilotBriefDeps,
   DedupReviewDeps,
   LeadConvertDeps,
   DeanonDeps,
+  LearningLoopDeps,
+  QualityMonitorDeps,
   EnrichmentRefreshDeps,
   InboundRoutingDeps,
   ReactivationDeps,
@@ -36,6 +40,8 @@ export interface RunnerModuleDeps {
   dedup(clientId: string): DedupReviewDeps | Promise<DedupReviewDeps>
   leadConvert(clientId: string): LeadConvertDeps | Promise<LeadConvertDeps>
   deanon(clientId: string): DeanonDeps | Promise<DeanonDeps>
+  learning(clientId: string): LearningLoopDeps | Promise<LearningLoopDeps>
+  quality(clientId: string): QualityMonitorDeps | Promise<QualityMonitorDeps>
 }
 
 /**
@@ -60,4 +66,6 @@ export function buildRegistry(deps: RunnerModuleDeps, llm: LlmClient): MapRegist
     .register(buildDedupReviewPipeline(deps.dedup))
     .register(buildLeadConvertPipeline(deps.leadConvert))
     .register(buildDeanonPipeline(deps.deanon))
+    .register(buildLearningLoopPipeline(deps.learning))
+    .register(buildQualityMonitorPipeline(deps.quality))
 }

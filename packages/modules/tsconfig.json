@@ -10,6 +10,7 @@
     { "path": "../core" },
     { "path": "../connectors" },
     { "path": "../data" },
+    { "path": "../learning" },
     { "path": "../pipelines" },
     { "path": "../skills" }
   ]

@@ -29,12 +29,19 @@ modules:
     always_on: true # hygiene runs on schedule once shipped
     schedule: "0 6 * * 1"
     thresholds: {}
+  platform.quality:
+    enabled: true
+    always_on: true
+    schedule: "0 7 * * 1" # after the weekly canonical enrichment refresh
+    thresholds: {}
   platform.metrics:
     enabled: true # baseline→delta reporting on from day one
     always_on: true
   platform.learning:
     enabled: true # feedback-event capture is always on; tuning speeds opt in below
     always_on: true
+    schedule: "0 8 * * 1"
+    thresholds: {}
 
 policies:
   approval:
@@ -46,7 +53,7 @@ policies:
   learning:
     capture: true
     exemplar_memory: true
-    weekly_tuning: false # turn on in Phase 3
+    weekly_tuning: true # proposals still require eval pass + brain_change approval
     outcome_optimization: false # turn on in Phase 4
   data:
     flag_dont_delete: true

@@ -81,6 +81,16 @@ function moduleDeps(): RunnerModuleDeps {
     loadDeanonInput: async () => ({ events: [], accounts: [] }),
     persistSignals: async () => 0,
   }
+  const learning = {
+    loadFeedback: async () => [],
+    evaluateProposal: async () => ({ pass: true, detail: 'pass' }),
+    persistDrafts: async () => 0,
+  }
+  const quality = {
+    loadReports: async () => ({ current: await remediation.loadHealthReport(), previous: null }),
+    saveMvd: async () => undefined,
+    notify: async () => undefined,
+  }
   return {
     enrichment: async () => enrichment,
     reactivation: async () => reactivation,
@@ -90,6 +100,8 @@ function moduleDeps(): RunnerModuleDeps {
     dedup: async () => dedup,
     leadConvert: async () => leadConvert,
     deanon: async () => deanon,
+    learning: async () => learning,
+    quality: async () => quality,
   }
 }
 
@@ -104,6 +116,8 @@ describe('runner production registry', () => {
     expect(registry.byId('dedup-review@0.1.0')?.moduleId).toBe('revops.dedup')
     expect(registry.byId('lead-convert@0.1.0')?.moduleId).toBe('revops.lead-convert')
     expect(registry.byId('deanon@0.1.0')?.moduleId).toBe('marketing.deanon')
+    expect(registry.byId('learning-loop@0.1.0')?.moduleId).toBe('platform.learning')
+    expect(registry.byId('quality-monitor@0.1.0')?.moduleId).toBe('platform.quality')
     expect(registry.forModule('revops.enrichment')?.id).toBe('enrichment-refresh@0.1.0')
     expect(registry.forModule('sales.reactivation')?.id).toBe('closed-lost-reactivation@0.1.0')
     expect(registry.forModule('marketing.inbound')?.id).toBe('inbound-routing@0.1.0')
@@ -112,6 +126,8 @@ describe('runner production registry', () => {
     expect(registry.forModule('revops.dedup')?.id).toBe('dedup-review@0.1.0')
     expect(registry.forModule('revops.lead-convert')?.id).toBe('lead-convert@0.1.0')
     expect(registry.forModule('marketing.deanon')?.id).toBe('deanon@0.1.0')
+    expect(registry.forModule('platform.learning')?.id).toBe('learning-loop@0.1.0')
+    expect(registry.forModule('platform.quality')?.id).toBe('quality-monitor@0.1.0')
   })
 
   it('resolves connector and brain-derived dependencies for the run client', async () => {

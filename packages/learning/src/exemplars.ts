@@ -37,7 +37,8 @@ export function extractExemplars(events: HumanActionEvent[], clientName: string)
     if (!event.reason || event.reason.trim() === '') continue
 
     const date = event.occurredAt.slice(0, 10)
-    const slug = `${event.action.replace(/_/g, '-')}-${event.machine.itemRef.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 40)}-${date}`
+    const eventSuffix = event.id.replace(/[^a-zA-Z0-9]/g, '').slice(-8)
+    const slug = `${event.action.replace(/_/g, '-')}-${event.machine.itemRef.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 40)}-${date}-${eventSuffix}`
     exemplars.push({
       slug,
       teaches,

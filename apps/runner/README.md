@@ -1,6 +1,6 @@
 # Runner configuration
 
-The runner polls the same Postgres database as the ops app and registers all eight production pipelines from `@sartre/modules`.
+The runner polls the same Postgres database as the ops app and registers all ten production pipelines from `@sartre/modules`.
 
 Required environment:
 
@@ -24,6 +24,8 @@ Every dependency section is a required resolver `(clientId) => deps`, so connect
   dedup: (clientId) => DedupReviewDeps,
   leadConvert: (clientId) => LeadConvertDeps,
   deanon: (clientId) => DeanonDeps,
+  learning: (clientId) => LearningLoopDeps,
+  quality: (clientId) => QualityMonitorDeps,
 }
 ```
 
@@ -42,5 +44,9 @@ The dedup resolver loads `PostgresCanonicalStore.duplicateReviewGroups(clientId)
 The lead-convert resolver pulls and stages raw CRM lead batches before mapping them into tenant-tagged candidates. Planning uses exact canonical email/domain matches only; conversion requests are snapshotted and remain behind the structural `crm_write` gate.
 
 The deanon resolver pulls and stages raw intent signal batches, then maps them into tenant-tagged events. Only exact canonical account-domain matches can become canonical signals, and persistence remains behind an `internal_report` gate. The module has no outreach, routing, or CRM-write dependency.
+
+The learning resolver reads tenant-scoped feedback from `PostgresFeedbackLog`. It runs the relevant known-answer eval for each weekly tuning proposal and idempotently persists only draft artifacts after the `brain_change` gate. It must never activate a draft or modify an approved brain document.
+
+The quality resolver loads the latest two health reports, refreshes machine-owned MVD state, and delivers contract/drift alerts only after the `client_comms` gate. Schedule it after the canonical enrichment refresh so it evaluates the newest report.
 
 Startup fails when the module is absent or incomplete. The runner never falls back to an empty registry, scripted connector, or alternate model, and deployment code cannot replace the reactivation pipeline's LLM client.

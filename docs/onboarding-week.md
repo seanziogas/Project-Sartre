@@ -26,15 +26,16 @@ Phase 3 deliverable (PLAN.md §5). The standard motion for every new client, cod
 ## Days 3–5 — First module live
 
 11. Enable the first module in `client.yaml` (typically `revops.enrichment` always-on, plus the first build track's module). MVD must be green or carry an attributed override.
-12. Register the module's pipeline in the runner registry with the client's deps; set the schedule for always-on modules.
+12. Supply the deployment-owned per-client dependencies for the already-registered production pipelines; verify schedules for always-on modules. `platform.quality` runs after canonical enrichment and `platform.learning` follows it weekly.
 13. Run it. Work the review queue — **every approval/rejection from run #1 feeds the learning engine.** Attribution is required; reasons on rejections become exemplars.
 14. Confirm in the ops surface: run journal clean, budgets tracking, health dashboard live.
 15. Flip `status: active`. Kickoff follow-up to the client includes the Data Health Report and the first module's output.
 
 ## Standing cadence from week 2
 
-- `enrichment-refresh` on schedule → contracts + drift alerts to the pod channel.
-- Weekly: `proposeTuning` over the feedback log → tuning report to the GTME; approved exemplars land in `brain/learned/`.
+- `enrichment-refresh` on schedule → canonical refresh, audit, and immediate contract checks.
+- `quality-monitor` after enrichment → MVD refresh + gated contract/drift alerts to the pod channel.
+- `learning-loop` weekly → reasoned exemplar drafts + eval-passing tuning drafts; the GTME decides the `brain_change` gate before draft persistence. Approval does not activate or apply a draft.
 - Graph health (`computeGraphHealth`) monthly or post-ingestion; fix orphans and promote emerging tags.
 - Metrics (`metricsByPeriod`) accumulate toward the QBR: approve-without-edit climbing is the renewal chart.
 
@@ -49,6 +50,7 @@ Phase 3 deliverable (PLAN.md §5). The standard motion for every new client, cod
 [ ] routing.md + data-conventions.md hand-written
 [ ] first module enabled (MVD green or attributed override)
 [ ] pipeline registered + scheduled; first run through review queue
+[ ] quality + learning dependency resolvers verified against this tenant only
 [ ] budgets + delivery channels verified in ops surface
 [ ] status: active; kickoff follow-up sent with Data Health Report
 ```

@@ -111,4 +111,12 @@ describe('resolveContactDuplicates', () => {
     expect(groups[0]!.memberIds.sort()).toEqual(['a', 'b'])
     expect(groups[0]).toMatchObject({ matchedOn: 'fuzzy', confidence: 'low' })
   })
+
+  it('excludes protected contacts from grouping', () => {
+    const groups = resolveContactDuplicates([
+      { id: 'a', firstName: 'Jane', lastName: 'Doe', email: 'jane@acme.com', linkedinUrl: null, companyName: 'Acme', protected: true },
+      { id: 'b', firstName: 'Jane', lastName: 'Doe', email: 'jane@acme.com', linkedinUrl: null, companyName: 'Acme' },
+    ])
+    expect(groups).toHaveLength(0)
+  })
 })

@@ -29,6 +29,7 @@ export interface ContactLike {
   email: string | null
   linkedinUrl: string | null
   companyName: string | null
+  protected?: boolean // excluded records never enter a duplicate review group
 }
 
 export interface DuplicateGroup {
@@ -143,16 +144,17 @@ export function resolveAccountDuplicates(accounts: AccountLike[]): DuplicateGrou
 export function resolveContactDuplicates(contacts: ContactLike[]): DuplicateGroup[] {
   const groups: DuplicateGroup[] = []
   const grouped = new Set<string>()
+  const eligible = contacts.filter((contact) => !contact.protected)
 
   // Tier 1: LinkedIn exact
-  for (const [key, members] of groupBy(contacts, (c) => (c.linkedinUrl ? normalizeLinkedinUrl(c.linkedinUrl) : null))) {
+  for (const [key, members] of groupBy(eligible, (c) => (c.linkedinUrl ? normalizeLinkedinUrl(c.linkedinUrl) : null))) {
     if (members.length < 2) continue
     groups.push({ key: `linkedin:${key}`, matchedOn: 'linkedin', memberIds: members.map((m) => m.id), confidence: 'high' })
     for (const m of members) grouped.add(m.id)
   }
 
   // Tier 2: email exact
-  const rest = contacts.filter((c) => !grouped.has(c.id))
+  const rest = eligible.filter((c) => !grouped.has(c.id))
   for (const [key, members] of groupBy(rest, (c) => (c.email ? normalizeEmail(c.email) : null))) {
     if (members.length < 2) continue
     groups.push({ key: `email:${key}`, matchedOn: 'email', memberIds: members.map((m) => m.id), confidence: 'high' })
@@ -160,7 +162,7 @@ export function resolveContactDuplicates(contacts: ContactLike[]): DuplicateGrou
   }
 
   // Tier 3: fuzzy fallback — full name + company, only when neither identifier exists
-  const fuzzyPool = contacts
+  const fuzzyPool = eligible
     .filter((c) => !grouped.has(c.id) && !c.linkedinUrl && !c.email)
     .map((c) => ({
       id: c.id,

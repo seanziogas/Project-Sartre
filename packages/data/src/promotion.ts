@@ -144,6 +144,7 @@ export function promoteContactCandidates(
     email: record.email.value,
     linkedinUrl: record.linkedinUrl.value,
     companyName: record.accountId ? accountNames.get(record.accountId) ?? null : null,
+    protected: record.flags.includes('excluded'),
   })))
   applyDuplicateFlags(records, duplicateGroups)
   return result(records, original, duplicateGroups, problems)
@@ -287,6 +288,7 @@ export function canonicalAuditRows(
       email: contact.email.value,
       linkedinUrl: contact.linkedinUrl.value,
       companyName: contact.accountId ? accountNames.get(contact.accountId) ?? null : null,
+      protected: contact.flags.includes('excluded'),
       accountRef: contact.accountId,
       ownerRef: contact.ownerRef.value,
       updatedAt: contact.sourceUpdatedAt.value,

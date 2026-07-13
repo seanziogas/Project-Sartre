@@ -15,6 +15,7 @@ import {
   canonicalAuditRows,
   canonicalBriefContexts,
   canonicalClosedLostRows,
+  canonicalDuplicateReviewGroups,
   promoteAccountCandidates,
   promoteActivityCandidates,
   promoteContactCandidates,
@@ -26,6 +27,7 @@ import type {
   CanonicalClosedLostRow,
   CanonicalBriefContext,
   CanonicalCandidate,
+  DuplicateReviewGroup,
   PromotionOptions,
   PromotionResult,
 } from '@sartre/data'
@@ -349,6 +351,14 @@ export class PostgresCanonicalStore {
       this.listAll(clientId, 'signal') as Promise<SignalType[]>,
     ])
     return canonicalBriefContexts(accounts, contacts, opportunities, activities, signals)
+  }
+
+  async duplicateReviewGroups(clientId: string): Promise<DuplicateReviewGroup[]> {
+    const [accounts, contacts] = await Promise.all([
+      this.listAll(clientId, 'account') as Promise<AccountType[]>,
+      this.listAll(clientId, 'contact') as Promise<ContactType[]>,
+    ])
+    return canonicalDuplicateReviewGroups(accounts, contacts)
   }
 
   async auditRows(clientId: string): Promise<{ accounts: AuditAccountRow[]; contacts: AuditContactRow[] }> {

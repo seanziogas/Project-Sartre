@@ -14,6 +14,7 @@ import {
   buildReactivationPipeline,
   buildRemediationPipeline,
   buildCopilotBriefsPipeline,
+  buildDedupReviewPipeline,
 } from '../src/index.js'
 
 const templatePath = resolve(import.meta.dirname, '../../../clients/_template/client.yaml')
@@ -359,6 +360,78 @@ describe('copilot briefs pipeline', () => {
     expect(run.status).toBe('failed')
     expect(run.spend.tokensUsd).toBe(0)
     expect(modelCalls).toBe(0)
+  })
+})
+
+describe('dedup review pipeline', () => {
+  const groups = [{
+    id: 'account:domain:acme.example',
+    recordType: 'account' as const,
+    matchedOn: 'domain' as const,
+    confidence: 'high' as const,
+    members: [
+      { canonicalId: 'a1', externalIds: { salesforce: '001-a' }, label: 'Acme' },
+      { canonicalId: 'a2', externalIds: { salesforce: '001-b' }, label: 'Acme Inc.' },
+    ],
+  }]
+
+  it('snapshots once, gates the review deck, and writes annotations only after approval', async () => {
+    let snapshots = 0
+    const written: unknown[][] = []
+    const pipeline = buildDedupReviewPipeline({
+      loadDuplicateGroups: async () => groups,
+      prepareAnnotationWrites: async () => groups[0]!.members.map((member) => ({
+        object: 'account' as const,
+        externalId: member.externalIds.salesforce,
+        fields: { Kiln_Duplicate_Group__c: groups[0]!.id },
+      })),
+      crm: {
+        snapshot: async () => { snapshots++; return 'dedup-snapshot-1' },
+        writeNamespaced: async (writes, snapshotRef) => {
+          written.push(writes)
+          return { written: writes.length, rejected: [], snapshotRef }
+        },
+      },
+    })
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'dedup-r1' })
+    const m = manifest('revops.dedup')
+
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: 'review:crm_write', status: 'pending' })
+    expect(parked.gates[0]!.payload).toMatchObject({ destructiveActions: false, snapshotRef: 'dedup-snapshot-1' })
+    expect(snapshots).toBe(1)
+    expect(written).toHaveLength(0)
+
+    const done = await engine.resolveGate(pipeline, 'dedup-r1', 'review:crm_write', 'approved', 'gtme@kiln', m)
+    expect(done.status).toBe('completed')
+    expect(snapshots).toBe(1)
+    expect(written[0]).toHaveLength(2)
+  })
+
+  it('rejects annotations targeting records outside the reviewed groups', async () => {
+    let snapshots = 0
+    let writes = 0
+    const pipeline = buildDedupReviewPipeline({
+      loadDuplicateGroups: async () => groups,
+      prepareAnnotationWrites: async () => [{
+        object: 'account',
+        externalId: '001-unreviewed',
+        fields: { Kiln_Duplicate_Group__c: groups[0]!.id },
+      }],
+      crm: {
+        snapshot: async () => { snapshots++; return 'never' },
+        writeNamespaced: async () => { writes++; return { written: 0, rejected: [], snapshotRef: 'never' } },
+      },
+    })
+    const run = await new PipelineEngine(new MemoryRunStore(), { now: NOW })
+      .start(pipeline, manifest('revops.dedup'), 'Acme')
+
+    expect(run.status).toBe('failed')
+    expect(run.gates).toHaveLength(0)
+    expect(snapshots).toBe(0)
+    expect(writes).toBe(0)
   })
 })
 

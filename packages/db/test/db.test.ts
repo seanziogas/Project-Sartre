@@ -235,6 +235,15 @@ describe('PostgresCanonicalStore (against PGlite)', () => {
     expect(audit.accounts).toHaveLength(2)
     expect(audit.accounts[0]).toMatchObject({ domain: 'durable.example', ownerRef: 'rep-1' })
     expect(audit.contacts).toEqual([])
+    expect(await store.duplicateReviewGroups('DurableClient')).toMatchObject([{
+      recordType: 'account',
+      confidence: 'high',
+      members: expect.arrayContaining([
+        expect.objectContaining({ externalIds: { hubspot: 'company-1' } }),
+        expect.objectContaining({ externalIds: { hubspot: 'company-2' } }),
+      ]),
+    }])
+    expect(await store.duplicateReviewGroups('OtherClient')).toEqual([])
   })
 
   it('coordinates stage, promotion, and tenant-scoped relationship resolution', async () => {

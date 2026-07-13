@@ -3,6 +3,7 @@ import type { Account } from '@sartre/core'
 import {
   canonicalAuditRows,
   canonicalClosedLostRows,
+  canonicalDuplicateReviewGroups,
   mapSourceRow,
   promoteAccountCandidates,
   promoteContactCandidates,
@@ -54,6 +55,15 @@ describe('canonical candidate promotion', () => {
         '00000000-0000-4000-8000-000000000202',
       ]) },
     ])
+    expect(canonicalDuplicateReviewGroups(promoted.records, [])).toMatchObject([{
+      recordType: 'account',
+      matchedOn: 'domain',
+      confidence: 'high',
+      members: expect.arrayContaining([
+        expect.objectContaining({ canonicalId: '00000000-0000-4000-8000-000000000201' }),
+        expect.objectContaining({ canonicalId: '00000000-0000-4000-8000-000000000202' }),
+      ]),
+    }])
   })
 
   it('updates by external identity but does not overwrite a human-corrected field', () => {

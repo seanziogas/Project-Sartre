@@ -1,6 +1,6 @@
 # Runner configuration
 
-The runner polls the same Postgres database as the ops app and registers all five production pipelines from `@sartre/modules`.
+The runner polls the same Postgres database as the ops app and registers all six production pipelines from `@sartre/modules`.
 
 Required environment:
 
@@ -21,6 +21,7 @@ Every dependency section is a required resolver `(clientId) => deps`, so connect
   inbound: (clientId) => InboundRoutingDeps,
   remediation: (clientId) => RemediationDeps,
   copilotBriefs: (clientId) => Omit<CopilotBriefDeps, 'llm'>,
+  dedup: (clientId) => DedupReviewDeps,
 }
 ```
 
@@ -33,5 +34,7 @@ The enrichment resolver must implement `refreshCanonical` using `CanonicalIngest
 The remediation resolver loads the latest canonical health report, prepares only namespaced CRM drafts within the pipeline's pre-reserved Clay budget, and uses a `CrmWriter` that snapshots source values before the structural `crm_write` gate opens.
 
 The copilot-brief resolver combines `PostgresCanonicalStore.briefContexts(clientId)` with approved Brain context per client. The runner injects the locked production model, and internal publication occurs only after the `internal_report` gate resolves.
+
+The dedup resolver loads `PostgresCanonicalStore.duplicateReviewGroups(clientId)` and can prepare namespaced annotations only. The platform exposes no merge or delete operation; annotations are snapshotted and remain behind the structural `crm_write` gate.
 
 Startup fails when the module is absent or incomplete. The runner never falls back to an empty registry, scripted connector, or alternate model, and deployment code cannot replace the reactivation pipeline's LLM client.

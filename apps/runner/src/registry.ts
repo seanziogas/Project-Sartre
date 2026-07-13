@@ -4,9 +4,11 @@ import {
   buildReactivationPipeline,
   buildRemediationPipeline,
   buildCopilotBriefsPipeline,
+  buildDedupReviewPipeline,
 } from '@sartre/modules'
 import type {
   CopilotBriefDeps,
+  DedupReviewDeps,
   EnrichmentRefreshDeps,
   InboundRoutingDeps,
   ReactivationDeps,
@@ -27,6 +29,7 @@ export interface RunnerModuleDeps {
   remediation(clientId: string): RemediationDeps | Promise<RemediationDeps>
   /** The runner injects the production LLM; deployments cannot replace it. */
   copilotBriefs(clientId: string): Omit<CopilotBriefDeps, 'llm'> | Promise<Omit<CopilotBriefDeps, 'llm'>>
+  dedup(clientId: string): DedupReviewDeps | Promise<DedupReviewDeps>
 }
 
 /**
@@ -48,4 +51,5 @@ export function buildRegistry(deps: RunnerModuleDeps, llm: LlmClient): MapRegist
     .register(buildInboundRoutingPipeline(deps.inbound))
     .register(buildRemediationPipeline(deps.remediation))
     .register(buildCopilotBriefsPipeline(copilotBriefs))
+    .register(buildDedupReviewPipeline(deps.dedup))
 }

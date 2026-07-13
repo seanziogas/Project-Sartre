@@ -66,12 +66,18 @@ function moduleDeps(): RunnerModuleDeps {
     tokenUsdPerBrief: 0.05,
     publishBriefs: async () => 0,
   }
+  const dedup = {
+    loadDuplicateGroups: async () => [],
+    prepareAnnotationWrites: async () => [],
+    crm: { snapshot: async () => 'snapshot', writeNamespaced: async () => ({ written: 0, rejected: [], snapshotRef: 'snapshot' }) },
+  }
   return {
     enrichment: async () => enrichment,
     reactivation: async () => reactivation,
     inbound: async () => inbound,
     remediation: async () => remediation,
     copilotBriefs: async () => copilotBriefs,
+    dedup: async () => dedup,
   }
 }
 
@@ -83,11 +89,13 @@ describe('runner production registry', () => {
     expect(registry.byId('inbound-routing@0.1.0')?.moduleId).toBe('marketing.inbound')
     expect(registry.byId('data-remediation@0.1.0')?.moduleId).toBe('revops.remediation')
     expect(registry.byId('copilot-briefs@0.1.0')?.moduleId).toBe('sales.copilot-briefs')
+    expect(registry.byId('dedup-review@0.1.0')?.moduleId).toBe('revops.dedup')
     expect(registry.forModule('revops.enrichment')?.id).toBe('enrichment-refresh@0.1.0')
     expect(registry.forModule('sales.reactivation')?.id).toBe('closed-lost-reactivation@0.1.0')
     expect(registry.forModule('marketing.inbound')?.id).toBe('inbound-routing@0.1.0')
     expect(registry.forModule('revops.remediation')?.id).toBe('data-remediation@0.1.0')
     expect(registry.forModule('sales.copilot-briefs')?.id).toBe('copilot-briefs@0.1.0')
+    expect(registry.forModule('revops.dedup')?.id).toBe('dedup-review@0.1.0')
   })
 
   it('resolves connector and brain-derived dependencies for the run client', async () => {

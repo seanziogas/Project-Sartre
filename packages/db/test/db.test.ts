@@ -394,6 +394,16 @@ describe('PostgresCanonicalStore (against PGlite)', () => {
       fields: { account_name: 'Reference Co', opportunity_loss_reason: 'Timing' },
     }])
     expect(await canonical.closedLostRows('Acme')).toHaveLength(0)
+    expect(await canonical.briefContexts('ReferenceClient')).toMatchObject([{
+      accountId: '00000000-0000-4000-8000-000000000401',
+      accountName: 'Reference Co',
+      evidence: expect.arrayContaining([
+        expect.objectContaining({ id: 'opportunity:00000000-0000-4000-8000-000000000404' }),
+        expect.objectContaining({ id: 'activity:00000000-0000-4000-8000-000000000405' }),
+      ]),
+    }])
+    expect((await canonical.briefContexts('Acme')).flatMap((context) => context.evidence))
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ id: 'activity:00000000-0000-4000-8000-000000000405' })]))
     expect(await staging.list('ReferenceClient')).toHaveLength(4)
 
     // Exact retry reuses staging batches and canonical external identities.

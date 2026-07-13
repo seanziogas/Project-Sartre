@@ -13,6 +13,7 @@ import { StagedBatchSchema } from '@sartre/connectors'
 import type { CacheEntry, CacheStore, StagedBatch } from '@sartre/connectors'
 import {
   canonicalAuditRows,
+  canonicalBriefContexts,
   canonicalClosedLostRows,
   promoteAccountCandidates,
   promoteActivityCandidates,
@@ -23,6 +24,7 @@ import type {
   AuditAccountRow,
   AuditContactRow,
   CanonicalClosedLostRow,
+  CanonicalBriefContext,
   CanonicalCandidate,
   PromotionOptions,
   PromotionResult,
@@ -336,6 +338,17 @@ export class PostgresCanonicalStore {
       this.listAll(clientId, 'opportunity') as Promise<OpportunityType[]>,
     ])
     return canonicalClosedLostRows(accounts, opportunities)
+  }
+
+  async briefContexts(clientId: string): Promise<CanonicalBriefContext[]> {
+    const [accounts, contacts, opportunities, activities, signals] = await Promise.all([
+      this.listAll(clientId, 'account') as Promise<AccountType[]>,
+      this.listAll(clientId, 'contact') as Promise<ContactType[]>,
+      this.listAll(clientId, 'opportunity') as Promise<OpportunityType[]>,
+      this.listAll(clientId, 'activity') as Promise<ActivityType[]>,
+      this.listAll(clientId, 'signal') as Promise<SignalType[]>,
+    ])
+    return canonicalBriefContexts(accounts, contacts, opportunities, activities, signals)
   }
 
   async auditRows(clientId: string): Promise<{ accounts: AuditAccountRow[]; contacts: AuditContactRow[] }> {

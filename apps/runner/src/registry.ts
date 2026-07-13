@@ -3,8 +3,10 @@ import {
   buildInboundRoutingPipeline,
   buildReactivationPipeline,
   buildRemediationPipeline,
+  buildCopilotBriefsPipeline,
 } from '@sartre/modules'
 import type {
+  CopilotBriefDeps,
   EnrichmentRefreshDeps,
   InboundRoutingDeps,
   ReactivationDeps,
@@ -23,6 +25,8 @@ export interface RunnerModuleDeps {
   reactivation(clientId: string): Omit<ReactivationDeps, 'llm'> | Promise<Omit<ReactivationDeps, 'llm'>>
   inbound(clientId: string): InboundRoutingDeps | Promise<InboundRoutingDeps>
   remediation(clientId: string): RemediationDeps | Promise<RemediationDeps>
+  /** The runner injects the production LLM; deployments cannot replace it. */
+  copilotBriefs(clientId: string): Omit<CopilotBriefDeps, 'llm'> | Promise<Omit<CopilotBriefDeps, 'llm'>>
 }
 
 /**
@@ -34,9 +38,14 @@ export function buildRegistry(deps: RunnerModuleDeps, llm: LlmClient): MapRegist
     const clientDeps = await deps.reactivation(clientId)
     return { ...clientDeps, llm }
   }
+  const copilotBriefs = async (clientId: string): Promise<CopilotBriefDeps> => {
+    const clientDeps = await deps.copilotBriefs(clientId)
+    return { ...clientDeps, llm }
+  }
   return new MapRegistry()
     .register(buildEnrichmentRefreshPipeline(deps.enrichment))
     .register(buildReactivationPipeline(reactivation))
     .register(buildInboundRoutingPipeline(deps.inbound))
     .register(buildRemediationPipeline(deps.remediation))
+    .register(buildCopilotBriefsPipeline(copilotBriefs))
 }

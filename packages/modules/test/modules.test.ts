@@ -13,6 +13,7 @@ import {
   buildInboundRoutingPipeline,
   buildReactivationPipeline,
   buildRemediationPipeline,
+  buildCopilotBriefsPipeline,
 } from '../src/index.js'
 
 const templatePath = resolve(import.meta.dirname, '../../../clients/_template/client.yaml')
@@ -286,6 +287,78 @@ describe('data remediation pipeline', () => {
     expect(run.status).toBe('failed')
     expect(run.spend.clayCredits).toBe(0)
     expect(preparations).toBe(0)
+  })
+})
+
+describe('copilot briefs pipeline', () => {
+  const input = {
+    accountId: 'account-1',
+    accountName: 'Acme Fleet',
+    generatedAt: '2026-07-09T12:00:00.000Z',
+    brainContext: 'ICP: fleet operators. Use a practical voice.',
+    evidence: [{
+      id: 'activity:meeting-1',
+      kind: 'activity' as const,
+      observedAt: '2026-07-08T12:00:00Z',
+      content: 'The buyer asked about deployment timing.',
+    }],
+  }
+  const validBrief = JSON.stringify({
+    status: 'draft',
+    accountId: input.accountId,
+    generatedAt: input.generatedAt,
+    title: 'Acme Fleet meeting brief',
+    executiveSummary: [{ text: 'Timing is the active topic.', sourceRefs: ['activity:meeting-1'] }],
+    recentSignals: [{ text: 'The buyer asked about deployment timing.', sourceRefs: ['activity:meeting-1'] }],
+    openOpportunities: [],
+    risks: [],
+    recommendedActions: [{ text: 'Clarify the target deployment date.', sourceRefs: ['activity:meeting-1'] }],
+    questionsForTheMeeting: [{ text: 'What constrains the deployment date?', sourceRefs: ['activity:meeting-1'] }],
+  })
+
+  it('generates once, parks at internal review, and publishes only after approval', async () => {
+    let modelCalls = 0
+    const published: unknown[][] = []
+    const pipeline = buildCopilotBriefsPipeline({
+      loadBriefInputs: async (clientId) => [{ ...input, accountName: `${clientId} Fleet` }],
+      llm: { complete: async () => { modelCalls++; return validBrief } },
+      tokenUsdPerBrief: 0.05,
+      publishBriefs: async (_clientId, briefs) => { published.push(briefs); return briefs.length },
+    })
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'brief-r1' })
+    const m = manifest('sales.copilot-briefs')
+
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: 'review:internal_report', status: 'pending' })
+    expect(parked.spend.tokensUsd).toBeCloseTo(0.05)
+    expect(modelCalls).toBe(1)
+    expect(published).toHaveLength(0)
+
+    const done = await engine.resolveGate(pipeline, 'brief-r1', 'review:internal_report', 'approved', 'gtme@kiln', m)
+    expect(done.status).toBe('completed')
+    expect(modelCalls).toBe(1)
+    expect(published).toHaveLength(1)
+    expect(done.checkpoints.publish).toMatchObject({ published: 1, failed: 0 })
+  })
+
+  it('rejects an unaffordable batch before calling the model', async () => {
+    let modelCalls = 0
+    const pipeline = buildCopilotBriefsPipeline({
+      loadBriefInputs: async () => [input],
+      llm: { complete: async () => { modelCalls++; return validBrief } },
+      tokenUsdPerBrief: 0.05,
+      publishBriefs: async () => 0,
+    })
+    const m = manifest('sales.copilot-briefs')
+    m.budgets.per_run_defaults.max_tokens_usd = 0.01
+    const run = await new PipelineEngine(new MemoryRunStore(), { now: NOW })
+      .start(pipeline, m, 'Acme')
+
+    expect(run.status).toBe('failed')
+    expect(run.spend.tokensUsd).toBe(0)
+    expect(modelCalls).toBe(0)
   })
 })
 

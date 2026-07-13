@@ -2,6 +2,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getManifest, listRuns } from '@/lib/data'
 import { ClientTabs } from '@/lib/nav'
+import { assertClientAccess, getPortalIdentity } from '@/lib/auth'
+import { canAccessClient } from '@sartre/core'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,13 +19,15 @@ const STATUS_PILL: Record<string, string> = {
 
 export default async function Runs({ params }: { params: Promise<{ client: string }> }) {
   const clientId = decodeURIComponent((await params).client)
+  const identity = await getPortalIdentity()
+  assertClientAccess(identity, clientId, 'view')
   const manifest = await getManifest(clientId)
   if (!manifest) notFound()
   const runs = await listRuns(clientId)
 
   return (
     <>
-      <ClientTabs clientId={clientId} active="runs" />
+      <ClientTabs clientId={clientId} active="runs" showCopilot={canAccessClient(identity, clientId, 'copilot')} />
       <h1>Runs</h1>
       {runs.length === 0 ? (
         <div className="card muted">No runs yet.</div>

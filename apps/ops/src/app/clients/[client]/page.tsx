@@ -1,16 +1,23 @@
 import { notFound } from 'next/navigation'
-import { budgetUsage, getManifest, listPendingGates, listRuns } from '@/lib/data'
+import { budgetUsage, getManifest, listFeedback, listPendingGates, listRuns } from '@/lib/data'
 import { ClientTabs, mvdPill } from '@/lib/nav'
+import { assertClientAccess, getPortalIdentity } from '@/lib/auth'
+import { canAccessClient } from '@sartre/core'
+import { computeReviewMetrics } from '@sartre/learning'
 
 export const dynamic = 'force-dynamic'
 
 export default async function ClientOverview({ params }: { params: Promise<{ client: string }> }) {
   const clientId = decodeURIComponent((await params).client)
+  const identity = await getPortalIdentity()
+  assertClientAccess(identity, clientId, 'view')
   const manifest = await getManifest(clientId)
   if (!manifest) notFound()
 
   const runs = await listRuns(clientId)
   const pending = await listPendingGates(clientId)
+  const feedback = (await listFeedback(clientId)).filter((event) => event.kind === 'human_action')
+  const trust = computeReviewMetrics(feedback)
   const budgets = budgetUsage(manifest, runs)
   // union of declared modules and audit-evaluated MVD statuses — a red module
   // the client hasn't enabled yet is exactly what this table must surface
@@ -19,7 +26,7 @@ export default async function ClientOverview({ params }: { params: Promise<{ cli
 
   return (
     <>
-      <ClientTabs clientId={clientId} active="overview" />
+      <ClientTabs clientId={clientId} active="overview" showCopilot={canAccessClient(identity, clientId, 'copilot')} />
       <h1>{manifest.client.name}</h1>
 
       <div className="grid">
@@ -49,6 +56,13 @@ export default async function ClientOverview({ params }: { params: Promise<{ cli
             </span>
           </div>
         </div>
+      </div>
+
+      <h2>Learning and trust</h2>
+      <div className="grid">
+        <div className="stat"><div className="label">Review decisions</div><div className="value">{trust.events}</div></div>
+        <div className="stat"><div className="label">Approved as-is</div><div className="value">{Math.round(trust.approveRate * 100)}%</div></div>
+        <div className="stat"><div className="label">Human overrides</div><div className="value">{Math.round(trust.overrideRate * 100)}%</div></div>
       </div>
 
       <h2>Modules</h2>
@@ -92,6 +106,11 @@ export default async function ClientOverview({ params }: { params: Promise<{ cli
       <div className="card muted">
         MD: {manifest.client.pod.md || '—'} · GTME: {manifest.client.pod.gtme || '—'} · TOS:{' '}
         {manifest.client.pod.tos || '—'} · engagement start: {manifest.client.engagement_start}
+      </div>
+      <h2>Subscription</h2>
+      <div className="card muted">
+        Plan: {manifest.commercial.plan} · status: {manifest.commercial.status} · portal seats: {manifest.commercial.portal_seats}
+        {' · '}renewal: {manifest.commercial.renewal_date ?? '—'}
       </div>
     </>
   )

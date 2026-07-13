@@ -25,6 +25,20 @@
       }
     },
     "status": { "enum": ["onboarding", "active", "paused", "archived"] },
+    "commercial": {
+      "type": "object",
+      "properties": {
+        "plan": { "enum": ["engagement", "platform"], "default": "engagement" },
+        "status": { "enum": ["trialing", "active", "past_due", "canceled"], "default": "active" },
+        "licensed_modules": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^(sales|marketing|revops|platform)\\.[a-z-]+$" },
+          "description": "Empty means every manifest-enabled module is licensed."
+        },
+        "portal_seats": { "type": "integer", "minimum": 0 },
+        "renewal_date": { "type": ["string", "null"], "format": "date" }
+      }
+    },
     "stack": {
       "description": "Tools in the client's stack, keyed by role. Connector config lives in the named connector's own config; this declares what exists.",
       "type": "object",

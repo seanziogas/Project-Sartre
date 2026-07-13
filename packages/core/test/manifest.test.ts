@@ -12,6 +12,19 @@ describe('parseManifest', () => {
     expect(manifest.status).toBe('onboarding')
     expect(manifest.policies.approval.outbound_send).toBe('block')
     expect(manifest.modules['platform.learning']?.enabled).toBe(true)
+    expect(manifest.commercial).toMatchObject({ plan: 'engagement', status: 'active', portal_seats: 5 })
+  })
+
+  it('blocks runs when the subscription is inactive or the module is unlicensed', () => {
+    const manifest = parseManifest(readFileSync(templatePath, 'utf8'))
+    manifest.status = 'active'
+    manifest.modules['revops.enrichment']!.enabled = true
+    manifest.mvd['revops.enrichment'] = { status: 'green', as_of: '2026-07-09', blocking_gaps: [] }
+    manifest.commercial.status = 'past_due'
+    expect(moduleRunnable(manifest, 'revops.enrichment').reason).toContain('commercial status past_due')
+    manifest.commercial.status = 'active'
+    manifest.commercial.licensed_modules = ['platform.learning']
+    expect(moduleRunnable(manifest, 'revops.enrichment').reason).toContain('not included')
   })
 
   it('rejects bad module ids', () => {

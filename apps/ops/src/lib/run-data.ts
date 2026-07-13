@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { HumanActionEvent } from '@sartre/core'
+import type { FeedbackEvent, HumanActionEvent } from '@sartre/core'
 import type { GateDecisionInput, RunRecord } from '@sartre/pipelines'
 
 export interface OpsRunStore {
@@ -10,6 +10,7 @@ export interface OpsRunStore {
 
 export interface OpsFeedbackLog {
   append(event: HumanActionEvent): Promise<void>
+  list(clientId: string, limit?: number): Promise<FeedbackEvent[]>
 }
 
 export interface PendingGate {
@@ -35,6 +36,10 @@ export class OpsRunData {
 
   getRun(clientId: string, runId: string): Promise<RunRecord | null> {
     return this.runs.getScoped(clientId, runId)
+  }
+
+  listFeedback(clientId: string, limit = 500): Promise<FeedbackEvent[]> {
+    return this.feedback.list(clientId, limit)
   }
 
   async listPendingGates(clientId: string): Promise<PendingGate[]> {

@@ -54,6 +54,16 @@ export const ClientManifest = z.object({
       .default({ md: '', gtme: '', tos: '' }),
   }),
   status: z.enum(['onboarding', 'active', 'paused', 'archived']),
+  commercial: z
+    .object({
+      plan: z.enum(['engagement', 'platform']).default('engagement'),
+      status: z.enum(['trialing', 'active', 'past_due', 'canceled']).default('active'),
+      /** Empty means all manifest-enabled modules are included. */
+      licensed_modules: z.array(ModuleId).default([]),
+      portal_seats: z.number().int().nonnegative().default(0),
+      renewal_date: isoDate.nullable().default(null),
+    })
+    .default({}),
   stack: z.object({
     crm: z.enum(['salesforce', 'hubspot', 'attio']).nullable().default(null),
     enrichment: z.array(z.string()).default([]),
@@ -146,6 +156,8 @@ export function parseManifest(yamlText: string): ClientManifest {
  * must have written a status).
  */
 export function moduleRunnable(manifest: ClientManifest, moduleId: string): { runnable: boolean; reason: string } {
+  const commercial = commerciallyRunnable(manifest, moduleId)
+  if (!commercial.runnable) return commercial
   const mod = manifest.modules[moduleId]
   if (!mod) return { runnable: false, reason: `module ${moduleId} not present in manifest` }
   if (!mod.enabled) return { runnable: false, reason: `module ${moduleId} is disabled` }
@@ -161,4 +173,15 @@ export function moduleRunnable(manifest: ClientManifest, moduleId: string): { ru
   }
   const gaps = mvd.blocking_gaps.map((g) => `${g.field} at ${Math.round(g.coverage * 100)}% (needs ${Math.round(g.required * 100)}%)`)
   return { runnable: false, reason: `MVD ${mvd.status}: ${gaps.join(', ') || 'gaps unspecified'}` }
+}
+
+/** Subscription checks are re-run when parked pipelines resume. */
+export function commerciallyRunnable(manifest: ClientManifest, moduleId: string): { runnable: boolean; reason: string } {
+  if (!['trialing', 'active'].includes(manifest.commercial.status)) {
+    return { runnable: false, reason: `commercial status ${manifest.commercial.status} does not permit module runs` }
+  }
+  if (manifest.commercial.licensed_modules.length > 0 && !manifest.commercial.licensed_modules.includes(moduleId)) {
+    return { runnable: false, reason: `module ${moduleId} is not included in the client subscription` }
+  }
+  return { runnable: true, reason: 'subscription permits module runs' }
 }

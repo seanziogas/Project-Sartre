@@ -84,6 +84,8 @@ function moduleDeps(): RunnerModuleDeps {
   const learning = {
     loadFeedback: async () => [],
     evaluateProposal: async () => ({ pass: true, detail: 'pass' }),
+    loadOptimizationInput: async () => ({ outcomes: [], variantByEventId: {}, gradedOutcomes: [] }),
+    evaluateOptimizationDraft: async () => ({ pass: true, detail: 'pass' }),
     persistDrafts: async () => 0,
   }
   const quality = {

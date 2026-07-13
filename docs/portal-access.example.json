@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "identities": [
+    {
+      "id": "idp-subject-kiln-admin",
+      "email": "admin@kiln.example",
+      "name": "Kiln Admin",
+      "grants": [{ "clientId": "*", "role": "internal_admin" }]
+    },
+    {
+      "id": "idp-subject-client-approver",
+      "email": "buyer@example.invalid",
+      "name": "Client Approver",
+      "grants": [{ "clientId": "Example Client", "role": "client_approver" }]
+    },
+    {
+      "id": "idp-subject-client-viewer",
+      "email": "viewer@example.invalid",
+      "name": "Client Viewer",
+      "grants": [{ "clientId": "Example Client", "role": "client_viewer" }]
+    }
+  ]
+}

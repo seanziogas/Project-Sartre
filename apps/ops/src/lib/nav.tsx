@@ -1,12 +1,13 @@
 import Link from 'next/link'
 
-export function ClientTabs({ clientId, active }: { clientId: string; active: string }) {
+export function ClientTabs({ clientId, active, showCopilot = false }: { clientId: string; active: string; showCopilot?: boolean }) {
   const base = `/clients/${encodeURIComponent(clientId)}`
   const tabs = [
     { key: 'overview', label: 'Overview', href: base },
     { key: 'review', label: 'Review Queue', href: `${base}/review` },
     { key: 'runs', label: 'Runs', href: `${base}/runs` },
     { key: 'health', label: 'Data Health', href: `${base}/health` },
+    ...(showCopilot ? [{ key: 'copilot', label: 'Copilot', href: `${base}/copilot` }] : []),
   ]
   return (
     <>

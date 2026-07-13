@@ -2,29 +2,42 @@ import { revalidatePath } from 'next/cache'
 import { notFound } from 'next/navigation'
 import { decideGate, getManifest, listPendingGates } from '@/lib/data'
 import { ClientTabs } from '@/lib/nav'
+import { assertClientAccess, getPortalIdentity, mayDecideGate } from '@/lib/auth'
+import { canAccessClient } from '@sartre/core'
 
 export const dynamic = 'force-dynamic'
 
 export default async function ReviewQueue({ params }: { params: Promise<{ client: string }> }) {
   const clientId = decodeURIComponent((await params).client)
+  const identity = await getPortalIdentity()
+  assertClientAccess(identity, clientId, 'approve')
   const manifest = await getManifest(clientId)
   if (!manifest) notFound()
-  const pending = await listPendingGates(clientId)
+  const pending = (await listPendingGates(clientId))
+    .filter((item) => mayDecideGate(identity, clientId, item.outputClass))
 
   async function decide(formData: FormData) {
     'use server'
     const rawDecision = formData.get('decision')
     if (rawDecision !== 'approved' && rawDecision !== 'rejected') throw new Error('invalid gate decision')
     const decision = rawDecision
-    const actor = String(formData.get('actor') ?? '').trim()
-    if (!actor) throw new Error('reviewer name required — approvals must be attributed')
+    const currentIdentity = await getPortalIdentity()
+    assertClientAccess(currentIdentity, clientId, 'approve')
+    const manifest = await getManifest(clientId)
+    if (!manifest || !['trialing', 'active'].includes(manifest.commercial.status)) {
+      throw new Error('subscription status does not permit gate decisions')
+    }
+    const gate = (await listPendingGates(clientId)).find((item) =>
+      item.run.runId === String(formData.get('runId')) && item.gateId === String(formData.get('gateId')),
+    )
+    if (!gate || !mayDecideGate(currentIdentity, clientId, gate.outputClass)) throw new Error('gate decision access denied')
     const reason = String(formData.get('reason') ?? '').trim() || undefined
     await decideGate(
       clientId,
       String(formData.get('runId')),
       String(formData.get('gateId')),
       decision,
-      actor,
+      currentIdentity.email,
       reason,
     )
     revalidatePath(`/clients/${encodeURIComponent(clientId)}/review`)
@@ -32,7 +45,7 @@ export default async function ReviewQueue({ params }: { params: Promise<{ client
 
   return (
     <>
-      <ClientTabs clientId={clientId} active="review" />
+      <ClientTabs clientId={clientId} active="review" showCopilot={canAccessClient(identity, clientId, 'copilot')} />
       <h1>Review queue</h1>
       {pending.length === 0 ? (
         <div className="card muted">Nothing waiting for approval.</div>
@@ -51,7 +64,7 @@ export default async function ReviewQueue({ params }: { params: Promise<{ client
             <form action={decide} className="actions">
               <input type="hidden" name="runId" value={item.run.runId} />
               <input type="hidden" name="gateId" value={item.gateId} />
-              <input type="text" name="actor" placeholder="your name (required)" required />
+              <span className="muted">as {identity.name}</span>
               <input type="text" name="reason" placeholder="reason (optional, feeds learning)" />
               <button className="approve" name="decision" value="approved" type="submit">
                 Approve

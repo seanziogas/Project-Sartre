@@ -20,6 +20,8 @@ export const BRAIN_DOC_TYPES = [
   'routing',
   'data-conventions',
   'engagement-log',
+  'exemplar',
+  'learning-proposal',
 ] as const
 
 export const BrainFrontmatter = z.object({

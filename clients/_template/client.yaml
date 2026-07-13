@@ -12,6 +12,13 @@ client:
 
 status: onboarding # onboarding | active | paused | archived
 
+commercial:
+  plan: engagement # engagement during delivery; platform for post-engagement subscription
+  status: active # trialing | active | past_due | canceled
+  licensed_modules: [] # empty = all manifest-enabled modules included
+  portal_seats: 5
+  renewal_date: null
+
 stack:
   crm: null # salesforce | hubspot | attio
   enrichment: [clay]
@@ -54,7 +61,7 @@ policies:
     capture: true
     exemplar_memory: true
     weekly_tuning: true # proposals still require eval pass + brain_change approval
-    outcome_optimization: false # turn on in Phase 4
+    outcome_optimization: true # evaluated proposals only; brain_change gate still blocks application
   data:
     flag_dont_delete: true
     snapshot_before_write: true

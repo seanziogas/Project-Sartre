@@ -206,4 +206,48 @@ describe('PipelineEngine', () => {
     expect(run.status).toBe('completed')
     expect(run.journal[0]!.detail).toContain('overridden by GTME')
   })
+
+  it('does not resume an approved effect after the subscription becomes inactive', async () => {
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'commercial-r1' })
+    const manifest = manifestWith(() => {})
+    let sent = false
+    const def = pipeline([
+      { id: 'review', run: async (ctx) => { await ctx.gate('outbound_send', 'copy'); return 'copy' } },
+      { id: 'send', run: async () => { sent = true; return 'sent' } },
+    ])
+    await engine.start(def, manifest, 'Acme')
+    const parked = await store.get('commercial-r1')
+    parked!.gates[0]!.status = 'approved'
+    parked!.gates[0]!.resolvedBy = 'client'
+    await store.save(parked!)
+    manifest.commercial.status = 'past_due'
+
+    const blocked = await engine.resume(def, 'commercial-r1', manifest)
+    expect(blocked.status).toBe('blocked')
+    expect(blocked.journal.at(-1)!.detail).toContain('commercial status past_due')
+    expect(sent).toBe(false)
+  })
+
+  it('applies commercial blocking to data-audit preflight and direct gate resolution', async () => {
+    const manifest = manifestWith(() => {})
+    manifest.commercial.status = 'canceled'
+    const audit = { ...pipeline([{ id: 'audit', run: async () => 'ran' }]), preflight: 'data_audit' as const }
+    const auditRun = await new PipelineEngine(new MemoryRunStore(), { now: NOW }).start(audit, manifest, 'Acme')
+    expect(auditRun.status).toBe('blocked')
+
+    manifest.commercial.status = 'active'
+    const store = new MemoryRunStore()
+    let sent = false
+    const def = pipeline([
+      { id: 'review', run: async (ctx) => { await ctx.gate('outbound_send', 'copy'); return 'copy' } },
+      { id: 'send', run: async () => { sent = true; return 'sent' } },
+    ])
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'direct-commercial-r1' })
+    await engine.start(def, manifest, 'Acme')
+    manifest.commercial.status = 'past_due'
+    const blocked = await engine.resolveGate(def, 'direct-commercial-r1', 'review:outbound_send', 'approved', 'client', manifest)
+    expect(blocked.status).toBe('blocked')
+    expect(sent).toBe(false)
+  })
 })

@@ -1,18 +1,22 @@
 import { notFound } from 'next/navigation'
 import { getHealthReport, getManifest } from '@/lib/data'
 import { ClientTabs } from '@/lib/nav'
+import { assertClientAccess, getPortalIdentity } from '@/lib/auth'
+import { canAccessClient } from '@sartre/core'
 
 export const dynamic = 'force-dynamic'
 
 export default async function Health({ params }: { params: Promise<{ client: string }> }) {
   const clientId = decodeURIComponent((await params).client)
+  const identity = await getPortalIdentity()
+  assertClientAccess(identity, clientId, 'view')
   const manifest = await getManifest(clientId)
   if (!manifest) notFound()
   const report = await getHealthReport(clientId)
 
   return (
     <>
-      <ClientTabs clientId={clientId} active="health" />
+      <ClientTabs clientId={clientId} active="health" showCopilot={canAccessClient(identity, clientId, 'copilot')} />
       <h1>Data health</h1>
       {!report ? (
         <div className="card muted">

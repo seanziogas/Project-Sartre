@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation'
 import { getRun } from '@/lib/data'
 import { ClientTabs } from '@/lib/nav'
+import { assertClientAccess, getPortalIdentity } from '@/lib/auth'
+import { canAccessClient } from '@sartre/core'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,12 +13,14 @@ export default async function RunDetail({
 }) {
   const p = await params
   const clientId = decodeURIComponent(p.client)
+  const identity = await getPortalIdentity()
+  assertClientAccess(identity, clientId, 'view')
   const run = await getRun(clientId, decodeURIComponent(p.runId))
   if (!run) notFound()
 
   return (
     <>
-      <ClientTabs clientId={clientId} active="runs" />
+      <ClientTabs clientId={clientId} active="runs" showCopilot={canAccessClient(identity, clientId, 'copilot')} />
       <h1>
         Run <span className="mono">{run.runId.slice(0, 8)}</span>{' '}
         <span className={`pill ${run.status === 'completed' ? 'green' : run.status === 'failed' || run.status === 'rejected' || run.status === 'blocked' ? 'red' : 'yellow'}`}>

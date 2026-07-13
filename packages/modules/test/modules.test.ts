@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { parseManifest } from '@sartre/core'
+import { parseBrainDoc, parseManifest } from '@sartre/core'
 import type { MvdStatus } from '@sartre/core'
 import { EnrichmentCache, MemoryCacheStore } from '@sartre/connectors'
 import { mapSourceRow, promoteAccountCandidates, runDataAudit } from '@sartre/data'
@@ -602,6 +602,8 @@ describe('learning loop pipeline (speeds 1–2)', () => {
     const pipeline = buildLearningLoopPipeline({
       loadFeedback: async () => events,
       evaluateProposal: async () => { evalCalls++; return { pass: true, detail: 'known-answer evals pass' } },
+      loadOptimizationInput: async () => ({ outcomes: [], variantByEventId: {}, gradedOutcomes: [] }),
+      evaluateOptimizationDraft: async () => ({ pass: true, detail: 'known-answer evals pass' }),
       persistDrafts: async (_clientId, drafts) => { persisted.push(drafts); return drafts.length },
       now: NOW,
     })
@@ -616,6 +618,7 @@ describe('learning loop pipeline (speeds 1–2)', () => {
     expect(payload.drafts.map((draft) => draft.kind)).toEqual(['exemplar', 'tuning_report'])
     expect(payload.drafts[0]!.content).toContain('status: draft')
     expect(payload.drafts[1]!.content).toContain('approved_by: ""')
+    expect(payload.drafts.every((draft) => parseBrainDoc(draft.content).frontmatter.status === 'draft')).toBe(true)
     expect(payload.metricsOnlyCorrections).toBe(7)
     expect(evalCalls).toBeGreaterThan(0)
     expect(persisted).toHaveLength(0)
@@ -631,6 +634,8 @@ describe('learning loop pipeline (speeds 1–2)', () => {
     const pipeline = buildLearningLoopPipeline({
       loadFeedback: async () => Array.from({ length: 8 }, (_, index) => override(index)),
       evaluateProposal: async () => ({ pass: false, detail: 'known-answer regression' }),
+      loadOptimizationInput: async () => ({ outcomes: [], variantByEventId: {}, gradedOutcomes: [] }),
+      evaluateOptimizationDraft: async () => ({ pass: false, detail: 'known-answer regression' }),
       persistDrafts: async () => { persistenceCalls++; return 0 },
       now: NOW,
     })
@@ -645,6 +650,56 @@ describe('learning loop pipeline (speeds 1–2)', () => {
     const done = await engine.resolveGate(pipeline, 'learning-failed-eval-r1', 'review:internal_report', 'approved', 'gtme@kiln', m)
     expect(done.status).toBe('completed')
     expect(persistenceCalls).toBe(0)
+  })
+
+  it('turns outcome optimization into evaluated, human-gated drafts without applying changes', async () => {
+    const outcome = (index: number, variant: string, success: boolean) => ({
+      kind: 'outcome' as const,
+      id: `10000000-0000-4000-8000-${String(1000 + index).padStart(12, '0')}`,
+      clientId: 'Acme',
+      occurredAt: '2026-07-09T10:00:00Z',
+      outcome: success ? 'meeting_booked' as const : 'reply_negative' as const,
+      accountId: null,
+      contactId: null,
+      opportunityId: null,
+      attributedRunIds: [`play:${variant}`],
+    })
+    const outcomes = [
+      ...Array.from({ length: 20 }, (_, index) => outcome(index, 'timing', index < 8)),
+      ...Array.from({ length: 20 }, (_, index) => outcome(index + 20, 'pricing', index < 2)),
+    ]
+    const variantByEventId = Object.fromEntries(outcomes.map((event) => [event.id, event.attributedRunIds[0]!]))
+    const gradedOutcomes = [
+      ...Array.from({ length: 30 }, (_, index) => ({ id: `grade-a-${index}`, score: 90, converted: index < 2 })),
+      ...Array.from({ length: 30 }, (_, index) => ({ id: `grade-b-${index}`, score: 70, converted: index < 10 })),
+    ]
+    const persisted: unknown[][] = []
+    const pipeline = buildLearningLoopPipeline({
+      loadFeedback: async () => outcomes,
+      evaluateProposal: async () => ({ pass: true, detail: 'pass' }),
+      loadOptimizationInput: async () => ({ outcomes, variantByEventId, gradedOutcomes }),
+      evaluateOptimizationDraft: async () => ({ pass: true, detail: 'known-answer evals pass' }),
+      persistDrafts: async (_clientId, drafts) => { persisted.push(drafts); return drafts.length },
+      now: NOW,
+    })
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'learning-speed3-r1' })
+    const m = manifest('platform.learning', (value) => {
+      value.policies.learning.exemplar_memory = false
+      value.policies.learning.weekly_tuning = false
+      value.policies.learning.outcome_optimization = true
+    })
+    const parked = await engine.start(pipeline, m, 'Acme')
+
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: 'review:brain_change', status: 'pending' })
+    const drafts = (parked.gates[0]!.payload as { drafts: { kind: string; content: string }[] }).drafts
+    expect(drafts.map((draft) => draft.kind)).toEqual(['allocation_report', 'calibration_report'])
+    expect(drafts.every((draft) => draft.content.includes('status: draft'))).toBe(true)
+    expect(drafts.every((draft) => parseBrainDoc(draft.content).frontmatter.brain_doc === 'learning-proposal')).toBe(true)
+    expect(persisted).toHaveLength(0)
+    await engine.resolveGate(pipeline, 'learning-speed3-r1', 'review:brain_change', 'approved', 'gtme@kiln', m)
+    expect(persisted).toHaveLength(1)
   })
 })
 

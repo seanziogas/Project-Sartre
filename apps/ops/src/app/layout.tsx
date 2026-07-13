@@ -3,8 +3,8 @@ import Link from 'next/link'
 import './globals.css'
 
 export const metadata = {
-  title: 'Sartre Ops',
-  description: 'GTM operating system — internal ops surface',
+  title: 'Sartre Portal',
+  description: 'Client and pod GTM operating system portal',
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -12,8 +12,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <header className="topbar">
-          <Link href="/" className="brand">Sartre Ops</Link>
-          <span className="tag">internal v1</span>
+          <Link href="/" className="brand">Sartre Portal</Link>
+          <span className="tag">client + pod workspace</span>
         </header>
         <main>{children}</main>
       </body>

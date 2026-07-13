@@ -90,6 +90,17 @@ input[type='text'] {
   border-radius: 6px;
   min-width: 16rem;
 }
+textarea {
+  display: block;
+  width: 100%;
+  min-height: 7rem;
+  margin: 0.5rem 0;
+  padding: 0.6rem;
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.copilot-form label { font-weight: 600; }
 
 nav.crumbs { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem; }
 nav.tabs { display: flex; gap: 1rem; border-bottom: 1px solid var(--line); margin: 0.75rem 0 1.25rem; }

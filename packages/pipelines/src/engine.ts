@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { moduleRunnable } from '@sartre/core'
+import { commerciallyRunnable, moduleRunnable } from '@sartre/core'
 import type { ClientManifest, HumanActionEvent } from '@sartre/core'
 import {
   BudgetExceededError,
@@ -73,6 +73,13 @@ export class PipelineEngine {
       updatedAt: nowIso,
     }
 
+    const commercial = commerciallyRunnable(manifest, pipeline.moduleId)
+    if (!commercial.runnable) {
+      run.status = 'blocked'
+      this.journal(run, null, 'run_blocked', commercial.reason)
+      await this.store.save(run)
+      return run
+    }
     if ((pipeline.preflight ?? 'module_mvd') === 'module_mvd') {
       const gateCheck = moduleRunnable(manifest, pipeline.moduleId)
       if (!gateCheck.runnable) {
@@ -93,6 +100,13 @@ export class PipelineEngine {
     const run = await this.store.get(runId)
     if (!run) throw new Error(`run ${runId} not found`)
     if (run.status === 'completed' || run.status === 'rejected' || run.status === 'blocked') return run
+    const commercial = commerciallyRunnable(manifest, run.moduleId)
+    if (!commercial.runnable) {
+      run.status = 'blocked'
+      this.journal(run, null, 'run_blocked', commercial.reason)
+      await this.store.save(run)
+      return run
+    }
     if (run.gates.some((g) => g.status === 'pending')) {
       // still parked — nothing to do until the gate resolves
       return run
@@ -144,6 +158,14 @@ export class PipelineEngine {
       feedbackEvent,
     })
     await this.options.onFeedbackEvent?.(feedbackEvent)
+
+    const commercial = commerciallyRunnable(manifest, run.moduleId)
+    if (!commercial.runnable) {
+      run.status = 'blocked'
+      this.journal(run, null, 'run_blocked', commercial.reason)
+      await this.store.save(run)
+      return run
+    }
 
     return this.execute(pipeline, run, manifest)
   }

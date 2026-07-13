@@ -2,7 +2,7 @@ import 'server-only'
 import { readFile, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { parseManifest } from '@sartre/core'
-import type { ClientManifest } from '@sartre/core'
+import type { ClientManifest, FeedbackEvent } from '@sartre/core'
 import type { RunRecord } from '@sartre/pipelines'
 import type { DataHealthReport } from '@sartre/data'
 import { getOpsDatabase } from './postgres'
@@ -68,6 +68,10 @@ export async function getRun(clientId: string, runId: string): Promise<RunRecord
 
 export async function listPendingGates(clientId: string): Promise<PendingGate[]> {
   return (await getOpsDatabase()).data.listPendingGates(clientId)
+}
+
+export async function listFeedback(clientId: string, limit = 500): Promise<FeedbackEvent[]> {
+  return (await getOpsDatabase()).data.listFeedback(clientId, limit)
 }
 
 /**

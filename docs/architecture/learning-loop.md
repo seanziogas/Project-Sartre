@@ -7,4 +7,4 @@
 
 Every proposed artifact carries draft frontmatter, source feedback-event IDs, and an empty `approved_by`. The full batch stops at a `brain_change` gate. Approval permits idempotent draft-file persistence only; it does not activate the artifact, edit an approved brain document, or apply a threshold. A GTME must review and promote a draft through the existing brain approval workflow.
 
-The pipeline honors the manifest's `capture`, `exemplar_memory`, and `weekly_tuning` flags. `outcome_optimization` remains Phase 4 and is not used by this pipeline.
+The pipeline honors the manifest's `capture`, `exemplar_memory`, `weekly_tuning`, and `outcome_optimization` flags. Phase 4 outcome optimization aggregates attributed outcomes into Thompson-sampling allocation proposals and compares historical grades with conversion outcomes for ICP recalibration. Both outputs run their deployment-owned eval, carry source evidence, remain drafts, and share the same `brain_change` gate. Allocation can only redistribute mix among already-approved variants; the pipeline has no live allocation or scoring-write dependency.

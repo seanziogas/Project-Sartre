@@ -1,11 +1,14 @@
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import type { FileClientBrainStore } from '@sartre/core'
 import type { Queryable } from '@sartre/db'
 import type { RunnerModuleDeps } from './registry.js'
 
 export interface RunnerDeploymentContext {
   /** Shared Postgres connection for cache-backed connector adapters. */
   db: Queryable
+  /** Approved, path-isolated brain documents and typed config per client. */
+  brains: FileClientBrainStore
 }
 
 export interface RunnerDeploymentModule {
@@ -36,8 +39,9 @@ function assertModuleDeps(value: unknown): asserts value is RunnerModuleDeps {
   if (!value || typeof value !== 'object') throw new Error('createModuleDeps must return an object')
   const record = value as Record<string, unknown>
   for (const key of ['enrichment', 'reactivation', 'inbound']) {
-    if (!record[key] || typeof record[key] !== 'object') {
-      throw new Error(`createModuleDeps result is missing ${key} dependencies`)
+    const section = record[key]
+    if (typeof section !== 'function') {
+      throw new Error(`createModuleDeps result must provide a per-client ${key}(clientId) resolver`)
     }
   }
 }

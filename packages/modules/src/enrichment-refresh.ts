@@ -9,6 +9,8 @@ import {
 import type { AuditAccountRow, AuditContactRow, DataHealthReport } from '@sartre/data'
 import type { MvdStatus } from '@sartre/core'
 import type { PipelineDefinition } from '@sartre/pipelines'
+import { resolveClientDeps } from './client-deps.js'
+import type { ClientDeps } from './client-deps.js'
 
 /**
  * revops.enrichment — scheduled hygiene/audit refresh (always-on mode).
@@ -30,7 +32,7 @@ export interface EnrichmentRefreshDeps {
   now?: () => Date
 }
 
-export function buildEnrichmentRefreshPipeline(deps: EnrichmentRefreshDeps): PipelineDefinition {
+export function buildEnrichmentRefreshPipeline(source: ClientDeps<EnrichmentRefreshDeps>): PipelineDefinition {
   return {
     id: 'enrichment-refresh@0.1.0',
     moduleId: 'revops.enrichment',
@@ -38,11 +40,12 @@ export function buildEnrichmentRefreshPipeline(deps: EnrichmentRefreshDeps): Pip
     steps: [
       {
         id: 'previous-report',
-        run: async (ctx) => deps.loadPreviousReport(ctx.clientId),
+        run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadPreviousReport(ctx.clientId),
       },
       {
         id: 'pull',
-        run: async () => {
+        run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
           const [accounts, contacts] = await Promise.all([deps.pullAccounts(), deps.pullContacts()])
           return { accounts, contacts }
         },
@@ -50,6 +53,7 @@ export function buildEnrichmentRefreshPipeline(deps: EnrichmentRefreshDeps): Pip
       {
         id: 'audit',
         run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
           const { accounts, contacts } = ctx.outputs.pull as {
             accounts: AuditAccountRow[]
             contacts: AuditContactRow[]
@@ -62,6 +66,7 @@ export function buildEnrichmentRefreshPipeline(deps: EnrichmentRefreshDeps): Pip
       {
         id: 'mvd-refresh',
         run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
           const report = ctx.outputs.audit as DataHealthReport
           const mvd: Record<string, MvdStatus> = {}
           for (const [moduleId, requirements] of Object.entries(DEFAULT_MODULE_MVD)) {
@@ -74,6 +79,7 @@ export function buildEnrichmentRefreshPipeline(deps: EnrichmentRefreshDeps): Pip
       {
         id: 'monitor',
         run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
           const report = ctx.outputs.audit as DataHealthReport
           const enabled = Object.entries(ctx.manifest.modules)
             .filter(([, m]) => m.enabled)

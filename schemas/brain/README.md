@@ -21,6 +21,7 @@ Brains are git-backed markdown. Every brain file carries YAML frontmatter valida
 | `data-conventions.md` | ✅ | Namespaced CRM field map (`<Prefix>_*__c` / "(Clay)" columns), controlled picklists, enrichment output columns, sentinels (`NEEDS REVIEW`, `NOT APPLICABLE - {reason}`), re-enrichment window (e.g. qualified-date < 90d → skip), exclusion rules by account type |
 | `engagement-log.md` | ✅ | Key contacts, decisions, sync notes — append-only |
 | `learned/` | ✅ (dir) | **Layer 8 writes here, humans approve:** `exemplars/` (corrected grades, edited copy as worked examples), `thresholds.yaml` (tuned values with provenance), `style/` (approved copy exemplars) |
+| `config/*.yaml` | ○ | Typed deterministic rules/templates consumed by modules. Every file carries `status`, `updated`, and `approved_by`; machine use requires active human approval |
 
 ✅ = required for MVD "brain-ready"; ○ = module-dependent (e.g. `routing.md` required only when `revops.routing` or `marketing.inbound` is enabled — modules declare brain-file requirements the same way they declare data MVD).
 

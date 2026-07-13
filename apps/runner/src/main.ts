@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { loadManifestsFromDir } from '@sartre/core'
+import { FileClientBrainStore, loadManifestsFromDir } from '@sartre/core'
 import { createPostgresConnection, migrate, PostgresRunStore } from '@sartre/db'
 import { Runner } from '@sartre/pipelines'
 import { AnthropicLlmClient } from '@sartre/skills'
@@ -19,12 +19,13 @@ const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('DATABASE_URL is required for the runner')
 const connection = createPostgresConnection(databaseUrl)
 const llm = new AnthropicLlmClient('claude-opus-4-8')
+const brains = new FileClientBrainStore(clientsDir)
 const moduleDeps = await initializeModuleDeps()
 
 async function initializeModuleDeps() {
   try {
     await migrate(connection)
-    return await loadModuleDeps(process.env.SARTRE_MODULE_DEPS, { db: connection })
+    return await loadModuleDeps(process.env.SARTRE_MODULE_DEPS, { db: connection, brains })
   } catch (error) {
     await connection.close()
     throw error

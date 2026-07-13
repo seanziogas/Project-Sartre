@@ -1,6 +1,8 @@
 import { campaignFactory, listGrader } from '@sartre/skills'
 import type { LlmClient } from '@sartre/skills'
 import type { PipelineDefinition } from '@sartre/pipelines'
+import { resolveClientDeps } from './client-deps.js'
+import type { ClientDeps } from './client-deps.js'
 
 /**
  * sales.reactivation — closed-lost reactivation (the proven Hologram
@@ -26,7 +28,7 @@ export interface ReactivationDeps {
   enroll(rows: { id: string; emails: [campaignFactory.GeneratedEmail, campaignFactory.GeneratedEmail, campaignFactory.GeneratedEmail] }[]): Promise<number>
 }
 
-export function buildReactivationPipeline(deps: ReactivationDeps): PipelineDefinition {
+export function buildReactivationPipeline(source: ClientDeps<ReactivationDeps>): PipelineDefinition {
   return {
     id: 'closed-lost-reactivation@0.1.0',
     moduleId: 'sales.reactivation',
@@ -34,6 +36,7 @@ export function buildReactivationPipeline(deps: ReactivationDeps): PipelineDefin
       {
         id: 'grade',
         run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
           const rows = await deps.pullClosedLost()
           // Reserve the configured estimate before making any paid calls so a
           // run that cannot fit its budget never reaches the model.
@@ -45,6 +48,7 @@ export function buildReactivationPipeline(deps: ReactivationDeps): PipelineDefin
       {
         id: 'select',
         run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
           const { grades, ungraded } = ctx.outputs.grade as listGrader.GradeListResult
           const selected = grades.filter((g) => g.score >= deps.minScore)
           const campaignRows = selected.map((g) => ({ id: g.id, ...deps.playFor(g) }))
@@ -54,6 +58,7 @@ export function buildReactivationPipeline(deps: ReactivationDeps): PipelineDefin
       {
         id: 'draft',
         run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
           const { campaignRows } = ctx.outputs.select as { campaignRows: campaignFactory.CampaignRow[] }
           const campaign = campaignFactory.generateCampaign(campaignRows, deps.templates)
           const sample = campaign.rows.filter((r) => campaign.reviewSampleIds.includes(r.id))
@@ -69,6 +74,7 @@ export function buildReactivationPipeline(deps: ReactivationDeps): PipelineDefin
       {
         id: 'enroll',
         run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
           const campaign = ctx.outputs.draft as campaignFactory.CampaignResult
           const sendable = campaign.rows
             .filter((r): r is typeof r & { emails: NonNullable<typeof r.emails> } => r.emails !== null)

@@ -10,14 +10,18 @@ Required environment:
 - `SARTRE_CLIENTS_DIR` — optional client-instance path; defaults to `clients/`.
 - `SARTRE_TICK_MS` — optional polling interval; defaults to 30 seconds.
 
-The deployment module keeps credential-bearing connector construction and client-specific brain configuration outside the platform registry. It receives `{ db }`; the runner owns and injects the locked production model adapter separately. It must return:
+The deployment module keeps credential-bearing connector construction outside the platform registry. It receives `{ db, brains }`; `brains` loads active, human-approved documents and typed config from the requested client instance. The runner owns and injects the locked production model adapter separately.
+
+Every dependency section is a required resolver `(clientId) => deps`, so connector credentials, grading context, routing rules, templates, and destinations cannot bleed between clients:
 
 ```ts
 {
-  enrichment: EnrichmentRefreshDeps,
-  reactivation: Omit<ReactivationDeps, 'llm'>,
-  inbound: InboundRoutingDeps,
+  enrichment: (clientId) => EnrichmentRefreshDeps,
+  reactivation: (clientId) => Omit<ReactivationDeps, 'llm'>,
+  inbound: (clientId) => InboundRoutingDeps,
 }
 ```
+
+For example, a reactivation resolver can call `brains.loadContext(clientId, [...])` for its grading constitution and `brains.loadApprovedConfig(clientId, 'reactivation.yaml', schema)` for deterministic play/template configuration. Draft or unattributed brain artifacts are rejected before a model, connector write, or outbound action runs.
 
 Startup fails when the module is absent or incomplete. The runner never falls back to an empty registry, scripted connector, or alternate model, and deployment code cannot replace the reactivation pipeline's LLM client.

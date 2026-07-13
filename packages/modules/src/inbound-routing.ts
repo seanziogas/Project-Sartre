@@ -1,5 +1,7 @@
 import { listEnricher, router } from '@sartre/skills'
 import type { PipelineDefinition } from '@sartre/pipelines'
+import { resolveClientDeps } from './client-deps.js'
+import type { ClientDeps } from './client-deps.js'
 
 /**
  * marketing.inbound — aggregate → enrich → score/route → CRM-WRITE GATE →
@@ -23,18 +25,19 @@ export interface InboundRoutingDeps {
   writeAssignments(assignments: { id: string; owner: string; reasoning: string }[]): Promise<number>
 }
 
-export function buildInboundRoutingPipeline(deps: InboundRoutingDeps): PipelineDefinition {
+export function buildInboundRoutingPipeline(source: ClientDeps<InboundRoutingDeps>): PipelineDefinition {
   return {
     id: 'inbound-routing@0.1.0',
     moduleId: 'marketing.inbound',
     steps: [
       {
         id: 'pull',
-        run: async () => deps.pullNewLeads(),
+        run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).pullNewLeads(),
       },
       {
         id: 'enrich',
         run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
           const leads = ctx.outputs.pull as Awaited<ReturnType<InboundRoutingDeps['pullNewLeads']>>
           if (!Number.isFinite(deps.clayCreditsPerProviderCall) || deps.clayCreditsPerProviderCall <= 0) {
             throw new Error('clayCreditsPerProviderCall must be a finite positive number')
@@ -53,6 +56,7 @@ export function buildInboundRoutingPipeline(deps: InboundRoutingDeps): PipelineD
       {
         id: 'route',
         run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
           const leads = ctx.outputs.pull as Awaited<ReturnType<InboundRoutingDeps['pullNewLeads']>>
           const enriched = (ctx.outputs.enrich as listEnricher.EnrichListResult).rows
           const enrichedById = new Map(enriched.map((e) => [e.id, e]))
@@ -72,6 +76,7 @@ export function buildInboundRoutingPipeline(deps: InboundRoutingDeps): PipelineD
       {
         id: 'writeback',
         run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
           const { assigned, manualReview, skipped } = ctx.outputs.route as {
             assigned: router.RoutingDecision[]
             manualReview: router.RoutingDecision[]

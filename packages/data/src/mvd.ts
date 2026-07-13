@@ -95,6 +95,10 @@ export const DEFAULT_MODULE_MVD: Record<string, MvdRequirement[]> = {
     { metric: 'contact_linkage', required: 0.7 },
     { metric: 'account_domain_coverage', required: 0.7, remediationCreditsPerRecord: 2 },
   ],
+  'marketing.deanon': [
+    { metric: 'account_domain_coverage', required: 0.7, remediationCreditsPerRecord: 2 },
+    { metric: 'account_dedup_cleanliness', required: 0.85 },
+  ],
   'sales.copilot-briefs': [
     { metric: 'account_domain_coverage', required: 0.6, remediationCreditsPerRecord: 2 },
   ],

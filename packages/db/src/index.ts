@@ -106,7 +106,7 @@ export async function migrate(db: Queryable): Promise<void> {
       batch_id      text PRIMARY KEY,
       client_id     text NOT NULL,
       connector_id  text NOT NULL,
-      object_type   text NOT NULL CHECK (object_type IN ('account', 'contact', 'opportunity', 'activity', 'lead')),
+      object_type   text NOT NULL CHECK (object_type IN ('account', 'contact', 'opportunity', 'activity', 'lead', 'signal')),
       extracted_at timestamptz NOT NULL,
       cursor_value  text,
       batch         jsonb NOT NULL,
@@ -116,7 +116,7 @@ export async function migrate(db: Queryable): Promise<void> {
       ON staged_batches (client_id, connector_id, object_type, extracted_at DESC);
     ALTER TABLE staged_batches DROP CONSTRAINT IF EXISTS staged_batches_object_type_check;
     ALTER TABLE staged_batches ADD CONSTRAINT staged_batches_object_type_check
-      CHECK (object_type IN ('account', 'contact', 'opportunity', 'activity', 'lead'));
+      CHECK (object_type IN ('account', 'contact', 'opportunity', 'activity', 'lead', 'signal'));
 
     CREATE TABLE IF NOT EXISTS canonical_records (
       client_id    text NOT NULL,
@@ -335,6 +335,15 @@ export class PostgresCanonicalStore {
     const result = promoteActivityCandidates(clientId, candidates, existing, options)
     for (const record of result.changedRecords) await this.put(clientId, 'activity', record)
     return result
+  }
+
+  /** Persist already-reviewed signals; validation and tenancy remain enforced here. */
+  async putSignals(clientId: string, signals: SignalType[]): Promise<SignalType[]> {
+    const stored: SignalType[] = []
+    for (const signal of signals) {
+      stored.push(await this.put(clientId, 'signal', signal) as SignalType)
+    }
+    return stored
   }
 
   async closedLostRows(clientId: string): Promise<CanonicalClosedLostRow[]> {

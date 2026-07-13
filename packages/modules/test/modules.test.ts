@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { parseManifest } from '@sartre/core'
 import type { MvdStatus } from '@sartre/core'
 import { EnrichmentCache, MemoryCacheStore } from '@sartre/connectors'
-import { runDataAudit } from '@sartre/data'
+import { mapSourceRow, promoteAccountCandidates, runDataAudit } from '@sartre/data'
 import type { DataHealthReport } from '@sartre/data'
 import { MemoryRunStore, PipelineEngine } from '@sartre/pipelines'
 import type { LlmClient } from '@sartre/skills'
@@ -16,6 +16,7 @@ import {
   buildCopilotBriefsPipeline,
   buildDedupReviewPipeline,
   buildLeadConvertPipeline,
+  buildDeanonPipeline,
 } from '../src/index.js'
 
 const templatePath = resolve(import.meta.dirname, '../../../clients/_template/client.yaml')
@@ -499,6 +500,82 @@ describe('lead conversion pipeline', () => {
     expect(run.status).toBe('awaiting_approval')
     expect(run.gates[0]).toMatchObject({ id: 'review:internal_report', status: 'pending' })
     expect(connectorCalls).toBe(0)
+  })
+})
+
+describe('website de-anonymization pipeline', () => {
+  const candidate = mapSourceRow(
+    { Id: '001-acme', Name: 'Acme', Website: 'acme.example' },
+    {
+      object: 'account', externalIdField: 'Id', fields: [
+        { source: 'Name', target: 'name', transform: 'trim' },
+        { source: 'Website', target: 'domain', transform: 'domain' },
+      ],
+    },
+    { clientId: 'Acme', connectorId: 'salesforce', extractedAt: '2026-07-13T10:00:00Z' },
+  )
+  const account = promoteAccountCandidates('Acme', [candidate], [], {
+    now: NOW,
+    createId: () => '00000000-0000-4000-8000-000000000801',
+  }).records[0]!
+
+  it('parks an exact-match plan and persists canonical signals only after approval', async () => {
+    const persisted: unknown[][] = []
+    let loads = 0
+    const pipeline = buildDeanonPipeline({
+      sourceSystem: 'clearbit',
+      loadDeanonInput: async (clientId) => {
+        loads++
+        return {
+          events: [
+            { clientId, sourceSystem: 'clearbit', externalId: 'sig-ready', companyDomain: 'www.acme.example', companyName: 'Acme', kind: 'pricing-visit', occurredAt: '2026-07-13T11:00:00Z', detail: 'Visited pricing' },
+            { clientId, sourceSystem: 'clearbit', externalId: 'sig-unknown', companyDomain: 'unknown.example', companyName: 'Unknown', kind: 'web-visit', occurredAt: '2026-07-13T11:01:00Z', detail: '' },
+          ],
+          accounts: [account],
+        }
+      },
+      persistSignals: async (_clientId, signals) => { persisted.push(signals); return signals.length },
+    })
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'deanon-r1' })
+    const m = manifest('marketing.deanon')
+
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: 'review:internal_report', status: 'pending' })
+    expect((parked.gates[0]!.payload as { plan: { decisions: { action: string }[] } }).plan.decisions.map((decision) => decision.action))
+      .toEqual(['match_account', 'unmatched'])
+    expect(persisted).toHaveLength(0)
+
+    const done = await engine.resolveGate(pipeline, 'deanon-r1', 'review:internal_report', 'approved', 'gtme@kiln', m)
+    expect(done.status).toBe('completed')
+    expect(loads).toBe(1)
+    expect(persisted).toHaveLength(1)
+    expect(persisted[0]).toMatchObject([{ accountId: account.id, externalIds: { clearbit: 'sig-ready' } }])
+    expect(done.checkpoints.persist).toEqual({ persisted: 1, reviewed: 1 })
+  })
+
+  it('still requires review but persists nothing when every event is unresolved', async () => {
+    let persistenceCalls = 0
+    const pipeline = buildDeanonPipeline({
+      sourceSystem: 'clearbit',
+      loadDeanonInput: async (clientId) => ({
+        events: [{ clientId, sourceSystem: 'clearbit', externalId: 'sig-manual', companyDomain: null, companyName: 'Unknown', kind: 'visit', occurredAt: '2026-07-13T11:00:00Z', detail: '' }],
+        accounts: [account],
+      }),
+      persistSignals: async () => { persistenceCalls++; return 0 },
+    })
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'deanon-manual-r1' })
+    const m = manifest('marketing.deanon')
+    const parked = await engine.start(pipeline, m, 'Acme')
+
+    expect(parked.status).toBe('awaiting_approval')
+    expect(persistenceCalls).toBe(0)
+    const done = await engine.resolveGate(pipeline, 'deanon-manual-r1', 'review:internal_report', 'approved', 'gtme@kiln', m)
+    expect(done.status).toBe('completed')
+    expect(persistenceCalls).toBe(0)
+    expect(done.checkpoints.persist).toEqual({ persisted: 0, reviewed: 0 })
   })
 })
 

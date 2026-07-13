@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LeadConversionRequest, partitionNamespacedWrites, StagedBatchSchema } from '../src/contract.js'
+import { IntentEvent, LeadConversionRequest, partitionNamespacedWrites, StagedBatchSchema } from '../src/contract.js'
 import { EnrichmentCache, MemoryCacheStore } from '../src/enrichment-cache.js'
 import type { CachedField } from '../src/enrichment-cache.js'
 
@@ -43,6 +43,22 @@ describe('lead connector contracts', () => {
       .toThrow('either create an account or target one existing account')
     expect(() => LeadConversionRequest.parse({ leadExternalId: '00Q-1', targetAccountExternalId: '001-1', createAccount: true }))
       .toThrow('either create an account or target one existing account')
+  })
+})
+
+describe('intent connector contracts', () => {
+  it('accepts raw signal staging and validates normalized intent events', () => {
+    expect(StagedBatchSchema.parse({
+      connectorId: 'clearbit',
+      object: 'signal',
+      extractedAt: '2026-07-13T12:00:00Z',
+      cursor: null,
+      rows: [{ id: 'sig-1', domain: 'acme.example' }],
+    }).object).toBe('signal')
+    expect(IntentEvent.parse({
+      clientId: 'Acme', sourceSystem: 'clearbit', externalId: 'sig-1',
+      companyDomain: 'acme.example', kind: 'pricing-visit', occurredAt: '2026-07-13T11:00:00Z',
+    })).toMatchObject({ externalId: 'sig-1', detail: '' })
   })
 })
 

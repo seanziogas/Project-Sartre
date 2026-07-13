@@ -23,6 +23,7 @@ export type Capability =
   | 'read_opportunities'
   | 'read_activities'
   | 'read_leads'
+  | 'read_intent_signals'
   | 'write_namespaced_fields'
   | 'snapshot'
   | 'enrich'
@@ -33,7 +34,7 @@ export type Capability =
 /** Raw rows exactly as the source system returned them, plus extraction metadata. */
 export interface StagedBatch<T = Record<string, unknown>> {
   connectorId: string
-  object: 'account' | 'contact' | 'opportunity' | 'activity' | 'lead'
+  object: 'account' | 'contact' | 'opportunity' | 'activity' | 'lead' | 'signal'
   extractedAt: string
   cursor: string | null // resume point for incremental pulls
   rows: T[]
@@ -42,11 +43,30 @@ export interface StagedBatch<T = Record<string, unknown>> {
 /** Runtime boundary: raw connector payloads are untrusted even when the adapter is typed. */
 export const StagedBatchSchema = z.object({
   connectorId: z.string().min(1),
-  object: z.enum(['account', 'contact', 'opportunity', 'activity', 'lead']),
+  object: z.enum(['account', 'contact', 'opportunity', 'activity', 'lead', 'signal']),
   extractedAt: z.string().datetime(),
   cursor: z.string().nullable(),
   rows: z.array(z.record(z.string(), z.unknown())),
 })
+
+/** Normalized intent event produced from a raw, staged provider row. */
+export const IntentEvent = z.object({
+  clientId: z.string().min(1),
+  sourceSystem: z.string().min(1),
+  externalId: z.string().min(1),
+  companyDomain: z.string().nullable().default(null),
+  companyName: z.string().nullable().default(null),
+  kind: z.string().min(1),
+  occurredAt: z.string().datetime(),
+  detail: z.string().default(''),
+})
+export type IntentEvent = z.infer<typeof IntentEvent>
+
+export interface IntentReader {
+  info: ConnectorInfo
+  /** Raw provider payloads must be staged before they are mapped to IntentEvent. */
+  pullSignals(cursor?: string): Promise<StagedBatch>
+}
 
 export interface CrmReader {
   info: ConnectorInfo

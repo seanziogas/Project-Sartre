@@ -76,6 +76,11 @@ function moduleDeps(): RunnerModuleDeps {
     loadConversionInput: async () => ({ leads: [], accounts: [], contacts: [] }),
     converter: { snapshotLeads: async () => 'snapshot', convertLeads: async () => ({ converted: 0, rejected: [], snapshotRef: 'snapshot' }) },
   }
+  const deanon = {
+    sourceSystem: 'clearbit',
+    loadDeanonInput: async () => ({ events: [], accounts: [] }),
+    persistSignals: async () => 0,
+  }
   return {
     enrichment: async () => enrichment,
     reactivation: async () => reactivation,
@@ -84,6 +89,7 @@ function moduleDeps(): RunnerModuleDeps {
     copilotBriefs: async () => copilotBriefs,
     dedup: async () => dedup,
     leadConvert: async () => leadConvert,
+    deanon: async () => deanon,
   }
 }
 
@@ -97,6 +103,7 @@ describe('runner production registry', () => {
     expect(registry.byId('copilot-briefs@0.1.0')?.moduleId).toBe('sales.copilot-briefs')
     expect(registry.byId('dedup-review@0.1.0')?.moduleId).toBe('revops.dedup')
     expect(registry.byId('lead-convert@0.1.0')?.moduleId).toBe('revops.lead-convert')
+    expect(registry.byId('deanon@0.1.0')?.moduleId).toBe('marketing.deanon')
     expect(registry.forModule('revops.enrichment')?.id).toBe('enrichment-refresh@0.1.0')
     expect(registry.forModule('sales.reactivation')?.id).toBe('closed-lost-reactivation@0.1.0')
     expect(registry.forModule('marketing.inbound')?.id).toBe('inbound-routing@0.1.0')
@@ -104,6 +111,7 @@ describe('runner production registry', () => {
     expect(registry.forModule('sales.copilot-briefs')?.id).toBe('copilot-briefs@0.1.0')
     expect(registry.forModule('revops.dedup')?.id).toBe('dedup-review@0.1.0')
     expect(registry.forModule('revops.lead-convert')?.id).toBe('lead-convert@0.1.0')
+    expect(registry.forModule('marketing.deanon')?.id).toBe('deanon@0.1.0')
   })
 
   it('resolves connector and brain-derived dependencies for the run client', async () => {

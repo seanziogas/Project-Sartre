@@ -2,7 +2,7 @@
 
 Layer 7 uses three explicit boundaries; connectors never write directly into golden records.
 
-1. **Staging** — `PostgresStagingStore` appends the raw `StagedBatch` exactly as returned by a connector. Account, contact, opportunity, activity, and lead batches are client-scoped and content-idempotent; retries do not duplicate raw data. Leads remain staged inputs until the separately gated CRM conversion workflow runs; they are not silently promoted as contacts.
+1. **Staging** — `PostgresStagingStore` appends the raw `StagedBatch` exactly as returned by a connector. Account, contact, opportunity, activity, lead, and signal batches are client-scoped and content-idempotent; retries do not duplicate raw data. Leads remain staged inputs until the separately gated CRM conversion workflow runs; intent signals remain staged until exact account resolution and internal review; neither is silently promoted.
 2. **Mapping** — a validated `SourceMapping` turns each raw row into a client-scoped `CanonicalCandidate`. Transform failures and required-field gaps are returned as problems instead of silently dropping the row. Every mapped value receives CRM provenance with connector, extraction time, confidence, and optional run ID.
 3. **Golden records** — callers apply the existing normalization/entity-resolution rules to candidates before promoting them into the canonical Account, Contact, Opportunity, Activity, or Signal schemas. `PostgresCanonicalStore` validates those schemas again, preserves external IDs and per-field provenance, and exposes no delete operation. Duplicate/excluded records remain present with flags.
 

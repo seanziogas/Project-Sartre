@@ -185,6 +185,13 @@ describe('PostgresStagingStore (against PGlite)', () => {
       rows: [{ Id: '00Q-1', Email: 'buyer@acme.example' }],
     })
     expect(await store.list('Acme', { object: 'lead' })).toHaveLength(1)
+    await store.append('Acme', {
+      ...batch,
+      connectorId: 'clearbit',
+      object: 'signal',
+      rows: [{ id: 'sig-1', domain: 'acme.example' }],
+    })
+    expect(await store.list('Acme', { object: 'signal' })).toHaveLength(1)
   })
 })
 
@@ -208,6 +215,27 @@ describe('PostgresCanonicalStore (against PGlite)', () => {
 
     const collision = accountRecord('Acme', '00000000-0000-4000-8000-000000000102', '001-acme')
     await expect(store.put('Acme', 'account', collision)).rejects.toThrow('already belongs')
+  })
+
+  it('persists reviewed canonical signals with tenant and external-id safeguards', async () => {
+    const store = new PostgresCanonicalStore(db)
+    const signal = {
+      id: '00000000-0000-4000-8000-000000000201',
+      clientId: 'SignalClient',
+      externalIds: { clearbit: 'sig-1' },
+      createdAt: '2026-07-13T12:00:00Z',
+      updatedAt: '2026-07-13T12:00:00Z',
+      flags: [],
+      accountId: null,
+      contactId: null,
+      kind: 'pricing-visit',
+      observedAt: '2026-07-13T11:00:00Z',
+      detail: 'Visited pricing',
+      provenance: { source: 'web' as const, origin: 'clearbit', retrievedAt: '2026-07-13T12:00:00Z', confidence: 'high' as const, runId: 'deanon-r1' },
+    }
+    expect(await store.putSignals('SignalClient', [signal])).toMatchObject([{ externalIds: { clearbit: 'sig-1' } }])
+    expect(await store.list('SignalClient', 'signal')).toMatchObject([{ kind: 'pricing-visit' }])
+    await expect(store.putSignals('OtherClient', [signal])).rejects.toThrow('does not match')
   })
 
   it('persists promoted candidates and returns canonical audit views', async () => {

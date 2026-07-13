@@ -2,11 +2,13 @@ import {
   buildEnrichmentRefreshPipeline,
   buildInboundRoutingPipeline,
   buildReactivationPipeline,
+  buildRemediationPipeline,
 } from '@sartre/modules'
 import type {
   EnrichmentRefreshDeps,
   InboundRoutingDeps,
   ReactivationDeps,
+  RemediationDeps,
 } from '@sartre/modules'
 import { MapRegistry } from '@sartre/pipelines'
 import type { LlmClient } from '@sartre/skills'
@@ -20,6 +22,7 @@ export interface RunnerModuleDeps {
   /** The runner injects the production LLM; deployments cannot replace it. */
   reactivation(clientId: string): Omit<ReactivationDeps, 'llm'> | Promise<Omit<ReactivationDeps, 'llm'>>
   inbound(clientId: string): InboundRoutingDeps | Promise<InboundRoutingDeps>
+  remediation(clientId: string): RemediationDeps | Promise<RemediationDeps>
 }
 
 /**
@@ -35,4 +38,5 @@ export function buildRegistry(deps: RunnerModuleDeps, llm: LlmClient): MapRegist
     .register(buildEnrichmentRefreshPipeline(deps.enrichment))
     .register(buildReactivationPipeline(reactivation))
     .register(buildInboundRoutingPipeline(deps.inbound))
+    .register(buildRemediationPipeline(deps.remediation))
 }

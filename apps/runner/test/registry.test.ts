@@ -45,10 +45,27 @@ function moduleDeps(): RunnerModuleDeps {
     toRoutingFields: () => ({}),
     writeAssignments: async () => 0,
   }
+  const remediation = {
+    loadHealthReport: async () => ({
+      generatedAt: '2026-07-13T00:00:00Z',
+      counts: { accounts: 0, contacts: 0 },
+      fillRates: [],
+      identifierCoverage: { accountDomain: 0, accountLinkedin: 0, contactEmail: 0, contactLinkedin: 0, invalidAccountDomains: 0, invalidContactEmails: 0 },
+      duplicates: { accountGroups: 0, accountRecordsInGroups: 0, contactGroups: 0, contactRecordsInGroups: 0, accountDensity: 0, contactDensity: 0 },
+      staleness: { staleDays: 365, staleAccounts: 0, staleContacts: 0 },
+      orphanContacts: 0,
+      ownership: { accountsUnowned: 0, contactsUnowned: 0 },
+      score: 0,
+      scoreBreakdown: [],
+    }),
+    prepareWrites: async () => ({ writes: [] }),
+    crm: { snapshot: async () => 'snapshot', writeNamespaced: async () => ({ written: 0, rejected: [], snapshotRef: 'snapshot' }) },
+  }
   return {
     enrichment: async () => enrichment,
     reactivation: async () => reactivation,
     inbound: async () => inbound,
+    remediation: async () => remediation,
   }
 }
 
@@ -58,9 +75,11 @@ describe('runner production registry', () => {
     expect(registry.byId('enrichment-refresh@0.1.0')?.moduleId).toBe('revops.enrichment')
     expect(registry.byId('closed-lost-reactivation@0.1.0')?.moduleId).toBe('sales.reactivation')
     expect(registry.byId('inbound-routing@0.1.0')?.moduleId).toBe('marketing.inbound')
+    expect(registry.byId('data-remediation@0.1.0')?.moduleId).toBe('revops.remediation')
     expect(registry.forModule('revops.enrichment')?.id).toBe('enrichment-refresh@0.1.0')
     expect(registry.forModule('sales.reactivation')?.id).toBe('closed-lost-reactivation@0.1.0')
     expect(registry.forModule('marketing.inbound')?.id).toBe('inbound-routing@0.1.0')
+    expect(registry.forModule('revops.remediation')?.id).toBe('data-remediation@0.1.0')
   })
 
   it('resolves connector and brain-derived dependencies for the run client', async () => {

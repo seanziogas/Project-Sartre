@@ -83,6 +83,7 @@ export function partitionNamespacedWrites(
   writes: NamespacedWrite[],
   namespacePrefix: string,
 ): { allowed: NamespacedWrite[]; rejected: { write: NamespacedWrite; reason: string }[] } {
+  if (namespacePrefix.trim() === '') throw new Error('CRM namespace prefix is required')
   const allowed: NamespacedWrite[] = []
   const rejected: { write: NamespacedWrite; reason: string }[] = []
   for (const write of writes) {

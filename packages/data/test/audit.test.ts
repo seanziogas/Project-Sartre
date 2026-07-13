@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { runDataAudit } from '../src/audit.js'
 import type { AuditAccountRow, AuditContactRow } from '../src/audit.js'
-import { DEFAULT_MODULE_MVD, evaluateMvd } from '../src/mvd.js'
+import { buildRemediationPlan, DEFAULT_MODULE_MVD, evaluateMvd } from '../src/mvd.js'
 
 const NOW = new Date('2026-07-09T00:00:00Z')
 
@@ -112,5 +112,24 @@ describe('evaluateMvd', () => {
   it('green when requirements are met', () => {
     const clean = runDataAudit([acct({ id: '1' })], [ct({ id: 'c1' })], { now: NOW })
     expect(evaluateMvd(clean, DEFAULT_MODULE_MVD['revops.enrichment']!).status).toBe('green')
+  })
+
+  it('collapses overlapping module gaps into one priced remediation plan', () => {
+    const plan = buildRemediationPlan(dirtyReport, {
+      'revops.enrichment': DEFAULT_MODULE_MVD['revops.enrichment']!,
+      'revops.tam': DEFAULT_MODULE_MVD['revops.tam']!,
+    })
+    const domain = plan.tasks.find((task) => task.metric === 'account_domain_coverage')
+
+    expect(domain).toMatchObject({
+      currentCoverage: 0.25,
+      targetCoverage: 0.8,
+      affectedRecords: 3,
+      estimatedCredits: 6,
+      blockedModules: ['revops.enrichment', 'revops.tam'],
+    })
+    expect(plan.tasks.filter((task) => task.metric === 'account_domain_coverage')).toHaveLength(1)
+    expect(plan.manualScopeTasks).toBe(1)
+    expect(plan.estimatedCredits).toBe(6)
   })
 })

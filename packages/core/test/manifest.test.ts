@@ -27,6 +27,11 @@ describe('parseManifest', () => {
     const unsafe = readFileSync(templatePath, 'utf8').replace('internal_report: block', 'internal_report: auto')
     expect(() => parseManifest(unsafe)).toThrow(ManifestError)
   })
+
+  it('rejects an empty CRM field namespace', () => {
+    const unsafe = readFileSync(templatePath, 'utf8').replace('namespaced_field_prefix: "Kiln_"', 'namespaced_field_prefix: ""')
+    expect(() => parseManifest(unsafe)).toThrow(ManifestError)
+  })
 })
 
 describe('moduleRunnable', () => {

@@ -93,7 +93,7 @@
             "flag_dont_delete": { "const": true, "description": "Non-negotiable; present so it is visible, not so it is configurable." },
             "snapshot_before_write": { "const": true },
             "reenrichment_window_days": { "type": "integer", "default": 90 },
-            "namespaced_field_prefix": { "type": "string", "description": "CRM field namespace, e.g. Clay_ or Kiln_" }
+            "namespaced_field_prefix": { "type": "string", "minLength": 1, "description": "CRM field namespace, e.g. Clay_ or Kiln_" }
           }
         }
       }

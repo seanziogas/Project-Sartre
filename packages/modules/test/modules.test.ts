@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { parseManifest } from '@sartre/core'
 import type { MvdStatus } from '@sartre/core'
 import { EnrichmentCache, MemoryCacheStore } from '@sartre/connectors'
+import { runDataAudit } from '@sartre/data'
 import type { DataHealthReport } from '@sartre/data'
 import { MemoryRunStore, PipelineEngine } from '@sartre/pipelines'
 import type { LlmClient } from '@sartre/skills'
@@ -11,6 +12,7 @@ import {
   buildEnrichmentRefreshPipeline,
   buildInboundRoutingPipeline,
   buildReactivationPipeline,
+  buildRemediationPipeline,
 } from '../src/index.js'
 
 const templatePath = resolve(import.meta.dirname, '../../../clients/_template/client.yaml')
@@ -188,6 +190,102 @@ describe('closed-lost reactivation pipeline', () => {
     expect(run.status).toBe('failed')
     expect(calls).toBe(0)
     expect(run.spend.tokensUsd).toBe(0)
+  })
+})
+
+describe('data remediation pipeline', () => {
+  const report = runDataAudit(
+    [
+      { id: 'a1', name: 'Ready', domain: 'ready.example', ownerRef: 'rep-1', updatedAt: '2026-07-01T00:00:00Z', linkedinUrl: null },
+      { id: 'a2', name: 'Gap', domain: null, ownerRef: null, updatedAt: null, linkedinUrl: null },
+    ],
+    [],
+    { now: NOW() },
+  )
+
+  it('prices drafts, snapshots once, gates, and writes only after approval', async () => {
+    const snapshots: unknown[][] = []
+    const writes: unknown[][] = []
+    const clients: string[] = []
+    const pipeline = buildRemediationPipeline({
+      loadHealthReport: async (clientId) => { clients.push(clientId); return report },
+      prepareWrites: async (clientId, plan) => {
+        clients.push(clientId)
+        expect(plan.tasks.some((task) => task.metric === 'account_domain_coverage')).toBe(true)
+        expect(new Set(plan.tasks.flatMap((task) => task.blockedModules))).toEqual(new Set(['revops.enrichment']))
+        return {
+          writes: [{ object: 'account', externalId: 'a2', fields: { Kiln_Domain__c: 'gap.example' } }],
+        }
+      },
+      crm: {
+        snapshot: async (batch) => { snapshots.push(batch); return 'snapshot-1' },
+        writeNamespaced: async (batch, snapshotRef) => {
+          writes.push(batch)
+          return { written: batch.length, rejected: [], snapshotRef }
+        },
+      },
+    })
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'remediation-r1' })
+    const m = manifest('revops.remediation')
+
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: 'review:crm_write', status: 'pending' })
+    expect((parked.gates[0]!.payload as { snapshotRef: string }).snapshotRef).toBe('snapshot-1')
+    expect(parked.spend.clayCredits).toBe(2)
+    expect(snapshots).toHaveLength(1)
+    expect(writes).toHaveLength(0)
+
+    const done = await engine.resolveGate(pipeline, 'remediation-r1', 'review:crm_write', 'approved', 'gtme@kiln', m)
+    expect(done.status).toBe('completed')
+    expect(snapshots).toHaveLength(1)
+    expect(writes).toHaveLength(1)
+    expect(clients).toEqual(['Acme', 'Acme'])
+    expect(done.checkpoints.write).toMatchObject({ written: 1, snapshotRef: 'snapshot-1' })
+  })
+
+  it('fails non-namespaced drafts before snapshot, gate, or CRM write', async () => {
+    let snapshots = 0
+    let writes = 0
+    const pipeline = buildRemediationPipeline({
+      loadHealthReport: async () => report,
+      prepareWrites: async () => ({
+        writes: [{ object: 'account', externalId: 'a2', fields: { Website: 'gap.example' } }],
+      }),
+      crm: {
+        snapshot: async () => { snapshots++; return 'never' },
+        writeNamespaced: async () => { writes++; return { written: 0, rejected: [], snapshotRef: 'never' } },
+      },
+    })
+    const run = await new PipelineEngine(new MemoryRunStore(), { now: NOW })
+      .start(pipeline, manifest('revops.remediation'), 'Acme')
+
+    expect(run.status).toBe('failed')
+    expect(run.journal.some((entry) => entry.detail.includes('non-namespaced'))).toBe(true)
+    expect(run.gates).toHaveLength(0)
+    expect(snapshots).toBe(0)
+    expect(writes).toBe(0)
+  })
+
+  it('rejects an unaffordable plan before preparing drafts', async () => {
+    let preparations = 0
+    const pipeline = buildRemediationPipeline({
+      loadHealthReport: async () => report,
+      prepareWrites: async () => { preparations++; return { writes: [] } },
+      crm: {
+        snapshot: async () => 'never',
+        writeNamespaced: async () => ({ written: 0, rejected: [], snapshotRef: 'never' }),
+      },
+    })
+    const m = manifest('revops.remediation')
+    m.budgets.per_run_defaults.max_clay_credits = 1
+    const run = await new PipelineEngine(new MemoryRunStore(), { now: NOW })
+      .start(pipeline, m, 'Acme')
+
+    expect(run.status).toBe('failed')
+    expect(run.spend.clayCredits).toBe(0)
+    expect(preparations).toBe(0)
   })
 })
 

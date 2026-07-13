@@ -15,3 +15,5 @@ Both storage tables promote `client_id` to an indexed column. All adapter reads 
 Closed-lost reactivation reads the grade-ready projection from `PostgresCanonicalStore.closedLostRows(clientId)`. That projection joins canonical opportunities to canonical accounts inside the same tenant and excludes protected records, so the module cannot bypass staging or grade a different client's CRM data.
 
 CRM writeback remains a separate connector operation: it must pass the namespaced-field guard, create a source snapshot, and stop at a human `crm_write` gate before dispatch.
+
+`data-remediation@0.1.0` implements that boundary for `revops.remediation`. It collapses overlapping MVD gaps for the modules configured in the client manifest into one deterministic plan, prices enrichable work in Clay credits, reserves the budget before draft preparation, rejects an entire batch containing non-namespaced fields, snapshots approved source records once, and dispatches only after an attributed human gate decision. Manual-scope gaps remain visible with null credit pricing rather than being treated as free or silently omitted.

@@ -83,7 +83,7 @@ export const ClientManifest = z.object({
         flag_dont_delete: z.literal(true).default(true),
         snapshot_before_write: z.literal(true).default(true),
         reenrichment_window_days: z.number().int().positive().default(90),
-        namespaced_field_prefix: z.string().default('Kiln_'),
+        namespaced_field_prefix: z.string().min(1).default('Kiln_'),
       })
       .default({}),
   }),

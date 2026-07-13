@@ -20,6 +20,24 @@ export interface MvdRequirement {
   remediationCreditsPerRecord?: number
 }
 
+export interface RemediationTask {
+  metric: MetricKey
+  object: 'account' | 'contact'
+  currentCoverage: number
+  targetCoverage: number
+  affectedRecords: number | null
+  estimatedCredits: number | null
+  blockedModules: string[]
+}
+
+export interface RemediationPlan {
+  generatedAt: string
+  healthScore: number
+  tasks: RemediationTask[]
+  estimatedCredits: number
+  manualScopeTasks: number
+}
+
 export type MetricKey =
   | 'account_domain_coverage'
   | 'account_linkedin_coverage'
@@ -113,6 +131,45 @@ export function evaluateMvd(
     })
   }
   return { status: worst, as_of: date, blocking_gaps: gaps }
+}
+
+/** Collapse overlapping module gaps into one priced remediation work plan. */
+export function buildRemediationPlan(
+  report: DataHealthReport,
+  requirementsByModule: Record<string, MvdRequirement[]> = DEFAULT_MODULE_MVD,
+): RemediationPlan {
+  const tasks = new Map<MetricKey, RemediationTask>()
+  for (const [moduleId, requirements] of Object.entries(requirementsByModule)) {
+    for (const requirement of requirements) {
+      const coverage = METRIC_ACCESSORS[requirement.metric](report)
+      if (coverage >= requirement.required) continue
+      const existing = tasks.get(requirement.metric)
+      if (existing) {
+        if (!existing.blockedModules.includes(moduleId)) existing.blockedModules.push(moduleId)
+        if (requirement.required <= existing.targetCoverage) continue
+      }
+      const affectedRecords = estimateMissingRecords(report, requirement.metric, requirement.required)
+      tasks.set(requirement.metric, {
+        metric: requirement.metric,
+        object: requirement.metric.startsWith('account') ? 'account' : 'contact',
+        currentCoverage: round2(coverage),
+        targetCoverage: requirement.required,
+        affectedRecords,
+        estimatedCredits: requirement.remediationCreditsPerRecord !== undefined && affectedRecords !== null
+          ? Math.ceil(affectedRecords * requirement.remediationCreditsPerRecord)
+          : null,
+        blockedModules: existing?.blockedModules ?? [moduleId],
+      })
+    }
+  }
+  const ordered = [...tasks.values()].sort((a, b) => a.metric.localeCompare(b.metric))
+  return {
+    generatedAt: report.generatedAt,
+    healthScore: report.score,
+    tasks: ordered,
+    estimatedCredits: ordered.reduce((total, task) => total + (task.estimatedCredits ?? 0), 0),
+    manualScopeTasks: ordered.filter((task) => task.estimatedCredits === null).length,
+  }
 }
 
 function estimateMissingRecords(report: DataHealthReport, metric: MetricKey, required: number): number | null {

@@ -16,6 +16,13 @@ describe('partitionNamespacedWrites', () => {
     expect(rejected).toHaveLength(1)
     expect(rejected[0]!.reason).toContain('Industry')
   })
+
+  it('never treats an empty namespace as permission to write every field', () => {
+    expect(() => partitionNamespacedWrites(
+      [{ object: 'account', externalId: '1', fields: { Website: 'acme.example' } }],
+      '',
+    )).toThrow('namespace prefix is required')
+  })
 })
 
 function field(value: string | number, retrievedAt: string, confidence: 'high' | 'medium' | 'low' = 'high'): CachedField {

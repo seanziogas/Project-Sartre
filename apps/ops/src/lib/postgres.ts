@@ -1,0 +1,36 @@
+import 'server-only'
+import {
+  createPostgresConnection,
+  migrate,
+  PostgresFeedbackLog,
+  PostgresRunStore,
+} from '@sartre/db'
+import { OpsRunData } from './run-data'
+
+interface OpsDatabase {
+  data: OpsRunData
+}
+
+const globalDatabase = globalThis as typeof globalThis & {
+  sartreOpsDatabase?: Promise<OpsDatabase>
+}
+
+export function getOpsDatabase(): Promise<OpsDatabase> {
+  globalDatabase.sartreOpsDatabase ??= initialize()
+  return globalDatabase.sartreOpsDatabase
+}
+
+async function initialize(): Promise<OpsDatabase> {
+  const databaseUrl = process.env.DATABASE_URL
+  if (!databaseUrl) throw new Error('DATABASE_URL is required for the ops app')
+  const connection = createPostgresConnection(databaseUrl)
+  try {
+    await migrate(connection)
+    return {
+      data: new OpsRunData(new PostgresRunStore(connection), new PostgresFeedbackLog(connection)),
+    }
+  } catch (error) {
+    await connection.close()
+    throw error
+  }
+}

@@ -7,7 +7,6 @@ Phase 0 deliverable. Defines where everything lives. Directories are created as 
 ```
 Project Sartre/
 ├── PLAN.md                  # master build plan (source of truth for scope)
-├── HANDOFF.md               # session/teammate handoff context
 ├── docs/
 │   ├── architecture/        # layer specs (repo-layout, memory-layer, data-foundation, …)
 │   ├── decisions/           # ADRs — one file per irreversible decision

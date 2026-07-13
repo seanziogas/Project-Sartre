@@ -13,9 +13,11 @@
   "dependencies": {
     "@sartre/connectors": "*",
     "@sartre/core": "*",
-    "@sartre/pipelines": "*"
+    "@sartre/pipelines": "*",
+    "pg": "^8.22.0"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.3.0"
+    "@electric-sql/pglite": "^0.3.0",
+    "@types/pg": "^8.20.0"
   }
 }

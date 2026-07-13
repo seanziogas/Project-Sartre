@@ -1,24 +1,23 @@
 import 'server-only'
-import { appendFile, mkdir, readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { randomUUID } from 'node:crypto'
 import { parseManifest } from '@sartre/core'
-import type { ClientManifest, HumanActionEvent } from '@sartre/core'
-import { FileRunStore } from '@sartre/pipelines'
+import type { ClientManifest } from '@sartre/core'
 import type { RunRecord } from '@sartre/pipelines'
 import type { DataHealthReport } from '@sartre/data'
+import { getOpsDatabase } from './postgres'
+import type { PendingGate } from './run-data'
 
 /**
  * Ops-surface data layer. Every read is client-scoped — this module is the
  * tenancy boundary for the app. Sources:
  *  - manifests/brains: SARTRE_CLIENTS_DIR (default: repo clients/)
- *  - run state + reports + feedback log: SARTRE_DATA_DIR (default: .sartre-data)
+ *  - run state + feedback log: Postgres via DATABASE_URL
+ *  - health reports: SARTRE_DATA_DIR (default: .sartre-data)
  */
 
 const CLIENTS_DIR = resolve(process.env.SARTRE_CLIENTS_DIR ?? join(process.cwd(), '../../clients'))
 const DATA_DIR = resolve(process.env.SARTRE_DATA_DIR ?? join(process.cwd(), '../../.sartre-data'))
-
-export const runStore = new FileRunStore(DATA_DIR)
 
 export interface ClientSummary {
   id: string
@@ -60,32 +59,15 @@ export async function getManifest(clientId: string): Promise<ClientManifest | nu
 }
 
 export async function listRuns(clientId: string): Promise<RunRecord[]> {
-  return runStore.list(clientId)
+  return (await getOpsDatabase()).data.listRuns(clientId)
 }
 
 export async function getRun(clientId: string, runId: string): Promise<RunRecord | null> {
-  return runStore.getScoped(clientId, runId)
-}
-
-export interface PendingGate {
-  run: RunRecord
-  gateId: string
-  step: string
-  outputClass: string
-  payload: unknown
+  return (await getOpsDatabase()).data.getRun(clientId, runId)
 }
 
 export async function listPendingGates(clientId: string): Promise<PendingGate[]> {
-  const runs = await runStore.list(clientId)
-  const pending: PendingGate[] = []
-  for (const run of runs) {
-    for (const gate of run.gates) {
-      if (gate.status === 'pending') {
-        pending.push({ run, gateId: gate.id, step: gate.step, outputClass: gate.outputClass, payload: gate.payload })
-      }
-    }
-  }
-  return pending
+  return (await getOpsDatabase()).data.listPendingGates(clientId)
 }
 
 /**
@@ -101,40 +83,7 @@ export async function decideGate(
   actor: string,
   reason?: string,
 ): Promise<void> {
-  const run = await runStore.getScoped(clientId, runId)
-  if (!run) throw new Error(`run ${runId} not found for ${clientId}`)
-  const now = new Date().toISOString()
-  const gate = run.gates.find((candidate) => candidate.id === gateId)
-  if (!gate) throw new Error(`gate ${gateId} not found`)
-  const event: HumanActionEvent = {
-    kind: 'human_action',
-    id: randomUUID(),
-    clientId,
-    occurredAt: now,
-    actor,
-    action: decision === 'approved' ? 'approve' : 'reject',
-    machine: { skillId: run.pipelineId, runId: run.runId, itemRef: gateId, output: gate.payload },
-    ...(reason !== undefined ? { reason } : {}),
-    surface: 'review_queue',
-  }
-  const decided = await runStore.decideGate({
-    runId,
-    gateId,
-    decision,
-    actor,
-    resolvedAt: now,
-    ...(reason !== undefined ? { reason } : {}),
-    source: 'via ops surface',
-    feedbackEvent: event,
-  })
-  if (!decided.feedbackEvents?.some((candidate) => candidate.id === event.id)) throw new Error('gate feedback was not persisted')
-  await appendFeedbackEvent(clientId, event)
-}
-
-async function appendFeedbackEvent(clientId: string, event: HumanActionEvent): Promise<void> {
-  const dir = join(DATA_DIR, clientId.replace(/[^a-zA-Z0-9 _.-]/g, '_'))
-  await mkdir(dir, { recursive: true })
-  await appendFile(join(dir, 'feedback-events.jsonl'), JSON.stringify(event) + '\n')
+  return (await getOpsDatabase()).data.decideGate(clientId, runId, gateId, decision, actor, reason)
 }
 
 export async function getHealthReport(clientId: string): Promise<DataHealthReport | null> {

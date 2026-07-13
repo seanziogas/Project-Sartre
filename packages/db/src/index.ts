@@ -2,6 +2,7 @@ import type { FeedbackEvent } from '@sartre/core'
 import type { CacheEntry, CacheStore } from '@sartre/connectors'
 import { applyGateDecision } from '@sartre/pipelines'
 import type { GateDecisionInput, RunnerStore, RunRecord, RunStatus } from '@sartre/pipelines'
+import { Pool } from 'pg'
 
 /**
  * Postgres adapters (Phase 2). Storage-shape decisions:
@@ -15,6 +16,29 @@ import type { GateDecisionInput, RunnerStore, RunRecord, RunStatus } from '@sart
  */
 export interface Queryable {
   query(sql: string, params?: unknown[]): Promise<{ rows: unknown[] }>
+}
+
+export interface PostgresConnection extends Queryable {
+  close(): Promise<void>
+}
+
+/** Production pg.Pool behind the same narrow boundary used by PGlite tests. */
+export function createPostgresConnection(
+  connectionString: string,
+  options: { maxConnections?: number } = {},
+): PostgresConnection {
+  if (connectionString.trim() === '') throw new Error('DATABASE_URL is required')
+  const pool = new Pool({
+    connectionString,
+    max: options.maxConnections ?? 10,
+  })
+  return {
+    query: async (sql, params) => {
+      const result = await pool.query(sql, params)
+      return { rows: result.rows as unknown[] }
+    },
+    close: async () => pool.end(),
+  }
 }
 
 export async function migrate(db: Queryable): Promise<void> {
@@ -54,6 +78,14 @@ export class PostgresRunStore implements RunnerStore {
 
   async get(runId: string): Promise<RunRecord | null> {
     const { rows } = await this.db.query('SELECT doc FROM runs WHERE run_id = $1', [runId])
+    return rows.length > 0 ? ((rows[0] as { doc: RunRecord }).doc) : null
+  }
+
+  async getScoped(clientId: string, runId: string): Promise<RunRecord | null> {
+    const { rows } = await this.db.query(
+      'SELECT doc FROM runs WHERE client_id = $1 AND run_id = $2',
+      [clientId, runId],
+    )
     return rows.length > 0 ? ((rows[0] as { doc: RunRecord }).doc) : null
   }
 

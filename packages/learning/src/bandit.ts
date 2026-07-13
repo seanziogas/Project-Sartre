@@ -65,6 +65,16 @@ export function thompsonAllocate(stats: VariantStats[], options: AllocationOptio
   const a0 = options.priorAlpha ?? 1
   const b0 = options.priorBeta ?? 1
   const rng = options.rng ?? Math.random
+  if (!Number.isInteger(draws) || draws < 1) throw new Error('draws must be a positive integer')
+  if (!Number.isFinite(minShare) || minShare < 0 || minShare > 1) throw new Error('minShare must be between 0 and 1')
+  if (!Number.isFinite(a0) || !Number.isFinite(b0) || a0 <= 0 || b0 <= 0) {
+    throw new Error('priorAlpha and priorBeta must be positive')
+  }
+  for (const stat of stats) {
+    if (!Number.isInteger(stat.successes) || stat.successes < 0 || !Number.isInteger(stat.failures) || stat.failures < 0) {
+      throw new Error('variant successes and failures must be non-negative integers')
+    }
+  }
 
   const wins = new Array<number>(stats.length).fill(0)
   for (let d = 0; d < draws; d++) {
@@ -81,14 +91,20 @@ export function thompsonAllocate(stats: VariantStats[], options: AllocationOptio
     wins[best]!++
   }
 
-  // guaranteed floor: every variant gets minShare, the remainder splits by win rate
-  const remainder = Math.max(0, 1 - minShare * stats.length)
-  const shares = wins.map((w) => minShare + remainder * (w / draws))
+  // Use the configured floor when mathematically possible; otherwise every
+  // variant receives the largest equal floor that can still sum to 100%.
+  const effectiveFloor = Math.min(minShare, 1 / stats.length)
+  const remainder = 1 - effectiveFloor * stats.length
+  const shares = wins.map((w) => effectiveFloor + remainder * (w / draws))
+  const roundedShares = shares.map(round3)
+  const roundingDelta = round3(1 - roundedShares.reduce((sum, share) => sum + share, 0))
+  const largest = wins.indexOf(Math.max(...wins))
+  roundedShares[largest] = round3(roundedShares[largest]! + roundingDelta)
 
   return stats
     .map((s, i) => ({
       variant: s.variant,
-      share: round3(shares[i]!),
+      share: roundedShares[i]!,
       rate: round3((a0 + s.successes) / (a0 + b0 + s.successes + s.failures)),
       observations: s.successes + s.failures,
     }))
@@ -99,7 +115,7 @@ export function renderAllocationReport(kind: string, allocations: Allocation[]):
   return [
     `# Allocation update — ${kind}`,
     '',
-    'Shares reflect the probability each variant is best given outcomes so far (Thompson sampling, 5% observability floor). Mix changes only — all variants passed review before going live.',
+    'Shares reflect the probability each variant is best given outcomes so far (Thompson sampling with an observability floor). Mix changes only — all variants passed review before going live.',
     '',
     '| variant | share | observed rate | n |',
     '|---|---|---|---|',

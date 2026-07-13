@@ -113,28 +113,32 @@ export function runDataAudit(
   const accountsUnowned = accounts.filter((a) => !a.ownerRef).length
   const contactsUnowned = contacts.filter((c) => !c.ownerRef).length
 
-  const safe = (num: number, den: number) => (den === 0 ? 1 : num / den)
+  // Empty populations have zero coverage but zero defect density. Treating
+  // zero records as 100% identifier coverage would incorrectly open MVD gates.
+  const ratio = (num: number, den: number) => (den === 0 ? 0 : num / den)
 
   // Composite score: identifier coverage is weighted heaviest because every
   // downstream module keys on it (the Field Priority Matrix, formalized).
   const components = [
-    { component: 'identifier_coverage', weight: 0.35, value: (safe(validDomains.length, accounts.length) + safe(validEmails.length, contacts.length)) / 2 },
-    { component: 'dedup_cleanliness', weight: 0.2, value: 1 - (safe(accountsInGroups, accounts.length) + safe(contactsInGroups, contacts.length)) / 2 },
-    { component: 'freshness', weight: 0.15, value: 1 - (safe(staleAccounts, accounts.length) + safe(staleContacts, contacts.length)) / 2 },
-    { component: 'linkage', weight: 0.15, value: 1 - safe(orphanContacts, contacts.length) },
-    { component: 'ownership', weight: 0.15, value: 1 - (safe(accountsUnowned, accounts.length) + safe(contactsUnowned, contacts.length)) / 2 },
+    { component: 'identifier_coverage', weight: 0.35, value: (ratio(validDomains.length, accounts.length) + ratio(validEmails.length, contacts.length)) / 2 },
+    { component: 'dedup_cleanliness', weight: 0.2, value: 1 - (ratio(accountsInGroups, accounts.length) + ratio(contactsInGroups, contacts.length)) / 2 },
+    { component: 'freshness', weight: 0.15, value: 1 - (ratio(staleAccounts, accounts.length) + ratio(staleContacts, contacts.length)) / 2 },
+    { component: 'linkage', weight: 0.15, value: 1 - ratio(orphanContacts, contacts.length) },
+    { component: 'ownership', weight: 0.15, value: 1 - (ratio(accountsUnowned, accounts.length) + ratio(contactsUnowned, contacts.length)) / 2 },
   ]
-  const score = Math.round(components.reduce((s, c) => s + c.weight * c.value, 0) * 100)
+  const score = accounts.length + contacts.length === 0
+    ? 0
+    : Math.round(components.reduce((s, c) => s + c.weight * c.value, 0) * 100)
 
   return {
     generatedAt: now.toISOString(),
     counts: { accounts: accounts.length, contacts: contacts.length },
     fillRates,
     identifierCoverage: {
-      accountDomain: safe(validDomains.length, accounts.length),
-      accountLinkedin: safe(accounts.filter((a) => a.linkedinUrl).length, accounts.length),
-      contactEmail: safe(validEmails.length, contacts.length),
-      contactLinkedin: safe(contacts.filter((c) => c.linkedinUrl).length, contacts.length),
+      accountDomain: ratio(validDomains.length, accounts.length),
+      accountLinkedin: ratio(accounts.filter((a) => a.linkedinUrl).length, accounts.length),
+      contactEmail: ratio(validEmails.length, contacts.length),
+      contactLinkedin: ratio(contacts.filter((c) => c.linkedinUrl).length, contacts.length),
       invalidAccountDomains: accountsWithDomain.length - validDomains.length,
       invalidContactEmails: contactsWithEmail.length - validEmails.length,
     },
@@ -143,8 +147,8 @@ export function runDataAudit(
       accountRecordsInGroups: accountsInGroups,
       contactGroups: contactGroups.length,
       contactRecordsInGroups: contactsInGroups,
-      accountDensity: safe(accountsInGroups, accounts.length),
-      contactDensity: safe(contactsInGroups, contacts.length),
+      accountDensity: ratio(accountsInGroups, accounts.length),
+      contactDensity: ratio(contactsInGroups, contacts.length),
     },
     staleness: { staleDays, staleAccounts, staleContacts },
     orphanContacts,

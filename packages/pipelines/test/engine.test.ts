@@ -102,7 +102,7 @@ describe('PipelineEngine', () => {
       'c',
     )
     expect(run.status).toBe('failed')
-    expect(run.spend.clayCredits).toBe(120)
+    expect(run.spend.clayCredits).toBe(60) // rejected spend is never booked
     expect(run.journal.some((j) => j.event === 'budget_exceeded')).toBe(true)
   })
 
@@ -135,6 +135,7 @@ describe('PipelineEngine', () => {
     const resumed = await engine.resolveGate(def, 'r1', 'draft:outbound_send', 'approved', 'gtme@kiln', manifest)
     expect(resumed.status).toBe('completed')
     expect(resumed.checkpoints.send).toBe('sent')
+    expect(resumed.feedbackEvents).toHaveLength(1) // durable with the gate transition
 
     // Layer 8: the approval is a labeled training example
     expect(events).toHaveLength(1)
@@ -170,29 +171,29 @@ describe('PipelineEngine', () => {
     expect(events[0]).toMatchObject({ action: 'reject', reason: 'tone off-brand' })
   })
 
-  it('notify policy journals and continues; auto is silent', async () => {
-    const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW })
-    const manifest = manifestWith((m) => {
-      m.policies.approval.crm_write = 'notify'
-      m.policies.approval.internal_report = 'auto'
-    })
-    const run = await engine.start(
-      pipeline([
-        {
-          id: 'write',
-          run: async (ctx) => {
-            await ctx.gate('crm_write', { fields: 1 })
-            await ctx.gate('internal_report', 'report')
-            return 'done'
-          },
-        },
-      ]),
-      manifest,
-      'c',
-    )
-    expect(run.status).toBe('completed')
-    expect(run.gates).toHaveLength(1) // notify recorded, auto not
-    expect(run.gates[0]).toMatchObject({ outputClass: 'crm_write', status: 'approved', resolvedBy: 'policy:notify' })
+  it('allows only one competing decision to transition a pending gate', async () => {
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'r1' })
+    const manifest = manifestWith(() => {})
+    const def = pipeline([{ id: 'draft', run: async (ctx) => { await ctx.gate('outbound_send', 'copy'); return 'copy' } }])
+    await engine.start(def, manifest, 'c')
+    const decisions = await Promise.allSettled([
+      store.decideGate({ runId: 'r1', gateId: 'draft:outbound_send', decision: 'approved', actor: 'a', resolvedAt: NOW().toISOString() }),
+      store.decideGate({ runId: 'r1', gateId: 'draft:outbound_send', decision: 'rejected', actor: 'b', resolvedAt: NOW().toISOString() }),
+    ])
+    expect(decisions.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(decisions.filter((result) => result.status === 'rejected')).toHaveLength(1)
+  })
+
+  it('blocks at every declared gate; no policy can auto-approve', async () => {
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'r1' })
+    const manifest = manifestWith(() => {})
+    const def = pipeline([{ id: 'report', run: async (ctx) => { await ctx.gate('internal_report', 'report'); return 'done' } }])
+    const parked = await engine.start(def, manifest, 'c')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ outputClass: 'internal_report', status: 'pending', resolvedBy: null })
+    expect((await engine.resolveGate(def, 'r1', 'report:internal_report', 'approved', 'gtme', manifest)).status).toBe('completed')
   })
 
   it('honors an attributed MVD override', async () => {

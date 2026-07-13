@@ -71,6 +71,8 @@ export async function gradeList(
   const batchSize = config.batchSize ?? 20
   const maxRetries = config.maxRetries ?? 3
   const minScore = config.minReviewerScore ?? 75
+  if (!Number.isInteger(batchSize) || batchSize < 1) throw new Error('batchSize must be a positive integer')
+  if (!Number.isInteger(maxRetries) || maxRetries < 1) throw new Error('maxRetries must be a positive integer')
 
   const grades: Grade[] = []
   const journal: BatchJournalEntry[] = []
@@ -95,13 +97,13 @@ export async function gradeList(
         carriedIssues = parsed.problems
         continue
       }
-      lastValid = parsed.grades
       if (parsed.problems.length > 0) {
         // structurally valid but violates vocab/coverage — retry with specifics
         entry.attempts.push({ attempt, reviewerScore: null, issues: parsed.problems, parseFailure: false })
         carriedIssues = parsed.problems
         continue
       }
+      lastValid = parsed.grades
 
       const reviewRaw = await llm.complete({
         system: reviewerSystem(config),
@@ -205,11 +207,19 @@ function parseGrades(
 
   const problems: string[] = []
   const grades: Grade[] = []
+  const inputIds = new Set(batch.map((row) => row.id))
+  const seenIds = new Set<string>()
   for (const item of arr) {
     const parsed = Grade.safeParse(item)
     if (!parsed.success) {
       problems.push(`invalid grade object: ${JSON.stringify(item).slice(0, 120)}`)
       continue
+    }
+    if (!inputIds.has(parsed.data.id)) problems.push(`row ${parsed.data.id}: id was not present in the input batch`)
+    if (seenIds.has(parsed.data.id)) problems.push(`row ${parsed.data.id}: duplicate grade in output`)
+    seenIds.add(parsed.data.id)
+    for (const field of Object.keys(config.vocabularies)) {
+      if (!(field in parsed.data.labels)) problems.push(`row ${parsed.data.id}: missing label field "${field}"`)
     }
     for (const [field, value] of Object.entries(parsed.data.labels)) {
       const vocab = config.vocabularies[field]

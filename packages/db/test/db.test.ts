@@ -85,6 +85,30 @@ describe('PostgresRunStore (against PGlite)', () => {
     expect(report.resumed).toContain('pg-r2')
     expect((await store.get('pg-r2'))!.status).toBe('completed')
   })
+
+  it('atomically rejects a second decision on the same Postgres gate', async () => {
+    const store = new PostgresRunStore(db)
+    const gated: PipelineDefinition = {
+      id: 'decision-cas@1',
+      moduleId: 'revops.enrichment',
+      steps: [{ id: 'draft', run: async (ctx) => { await ctx.gate('outbound_send', 'copy'); return 'ok' } }],
+    }
+    await new PipelineEngine(store, { runId: 'pg-r3' }).start(gated, manifest(), 'Acme')
+    await store.decideGate({
+      runId: 'pg-r3',
+      gateId: 'draft:outbound_send',
+      decision: 'approved',
+      actor: 'first',
+      resolvedAt: '2026-07-10T12:00:00Z',
+    })
+    await expect(store.decideGate({
+      runId: 'pg-r3',
+      gateId: 'draft:outbound_send',
+      decision: 'rejected',
+      actor: 'second',
+      resolvedAt: '2026-07-10T12:00:01Z',
+    })).rejects.toThrow('already approved')
+  })
 })
 
 describe('PostgresCacheStore (against PGlite)', () => {

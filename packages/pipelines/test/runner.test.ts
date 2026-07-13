@@ -35,6 +35,9 @@ describe('cronMatches', () => {
   })
   it('rejects malformed expressions', () => {
     expect(() => cronMatches('* * *', new Date())).toThrow('5 fields')
+    expect(() => cronMatches('99 * * * *', new Date())).toThrow('out of bounds')
+    expect(() => cronMatches('1foo * * * *', new Date())).toThrow('invalid cron value')
+    expect(cronMatches('0 0 * * 6-7', at('2026-07-05T00:00:00Z'))).toBe(true)
   })
 })
 

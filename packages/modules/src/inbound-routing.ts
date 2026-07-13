@@ -36,13 +36,13 @@ export function buildInboundRoutingPipeline(deps: InboundRoutingDeps): PipelineD
         id: 'enrich',
         run: async (ctx) => {
           const leads = ctx.outputs.pull as Awaited<ReturnType<InboundRoutingDeps['pullNewLeads']>>
+          if (!Number.isFinite(deps.clayCreditsPerProviderCall) || deps.clayCreditsPerProviderCall <= 0) {
+            throw new Error('clayCreditsPerProviderCall must be a finite positive number')
+          }
+          const creditCap = ctx.manifest.budgets.per_run_defaults.max_clay_credits
           const result = await listEnricher.enrichList(leads, deps.enrichment, {
             fields: deps.fieldsWanted,
-            maxProviderCalls: ctx.manifest.budgets.per_run_defaults.max_clay_credits
-              ? Math.floor(
-                  (ctx.manifest.budgets.per_run_defaults.max_clay_credits ?? 0) / deps.clayCreditsPerProviderCall,
-                )
-              : null,
+            maxProviderCalls: creditCap === null ? null : Math.floor(creditCap / deps.clayCreditsPerProviderCall),
           })
           if (result.providerCalls > 0) {
             ctx.spendCredits(result.providerCalls * deps.clayCreditsPerProviderCall, `enriched ${result.providerCalls} leads via provider`)

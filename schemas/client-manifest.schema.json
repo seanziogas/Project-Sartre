@@ -73,10 +73,10 @@
       "required": ["approval"],
       "properties": {
         "approval": {
-          "description": "Human-gate policy per output class. block = queue until approved (default for anything outward-facing); notify = proceed and inform; auto = no gate (internal-only outputs).",
+          "description": "Human-gate policy per output class. Human approval is structural; every declared gate blocks until a person decides it.",
           "type": "object",
           "propertyNames": { "enum": ["outbound_send", "crm_write", "client_comms", "brain_change", "internal_report"] },
-          "additionalProperties": { "enum": ["block", "notify", "auto"] }
+          "additionalProperties": { "const": "block" }
         },
         "learning": {
           "type": "object",
@@ -119,13 +119,13 @@
     "budgets": {
       "type": "object",
       "properties": {
-        "clay_credits_monthly": { "type": ["integer", "null"] },
-        "token_budget_monthly_usd": { "type": ["number", "null"] },
+        "clay_credits_monthly": { "type": ["integer", "null"], "minimum": 0 },
+        "token_budget_monthly_usd": { "type": ["number", "null"], "minimum": 0 },
         "per_run_defaults": {
           "type": "object",
           "properties": {
-            "max_clay_credits": { "type": ["integer", "null"] },
-            "max_tokens_usd": { "type": ["number", "null"] }
+            "max_clay_credits": { "type": ["integer", "null"], "minimum": 0 },
+            "max_tokens_usd": { "type": ["number", "null"], "minimum": 0 }
           }
         }
       }

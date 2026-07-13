@@ -27,7 +27,8 @@ export const ModuleConfig = z.object({
 })
 export type ModuleConfig = z.infer<typeof ModuleConfig>
 
-export const ApprovalPolicy = z.enum(['block', 'notify', 'auto'])
+/** Human approval is structural. Every declared gate blocks for a person. */
+export const ApprovalPolicy = z.literal('block')
 
 export const MvdGap = z.object({
   field: z.string(),
@@ -99,12 +100,12 @@ export const ClientManifest = z.object({
   }),
   budgets: z
     .object({
-      clay_credits_monthly: z.number().int().nullable().default(null),
-      token_budget_monthly_usd: z.number().nullable().default(null),
+      clay_credits_monthly: z.number().int().nonnegative().nullable().default(null),
+      token_budget_monthly_usd: z.number().nonnegative().nullable().default(null),
       per_run_defaults: z
         .object({
-          max_clay_credits: z.number().int().nullable().default(null),
-          max_tokens_usd: z.number().nullable().default(null),
+          max_clay_credits: z.number().int().nonnegative().nullable().default(null),
+          max_tokens_usd: z.number().nonnegative().nullable().default(null),
         })
         .default({}),
     })

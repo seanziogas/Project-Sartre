@@ -103,23 +103,9 @@ export async function decideGate(
 ): Promise<void> {
   const run = await runStore.getScoped(clientId, runId)
   if (!run) throw new Error(`run ${runId} not found for ${clientId}`)
-  const gate = run.gates.find((g) => g.id === gateId)
-  if (!gate) throw new Error(`gate ${gateId} not found`)
-  if (gate.status !== 'pending') throw new Error(`gate already ${gate.status}`)
-
   const now = new Date().toISOString()
-  gate.status = decision
-  gate.resolvedBy = actor
-  gate.resolvedAt = now
-  run.journal.push({
-    at: now,
-    step: gate.step,
-    event: 'gate_resolved',
-    detail: `${gate.outputClass} ${decision} by ${actor}${reason ? `: ${reason}` : ''} (via ops surface)`,
-  })
-  run.updatedAt = now
-  await runStore.save(run)
-
+  const gate = run.gates.find((candidate) => candidate.id === gateId)
+  if (!gate) throw new Error(`gate ${gateId} not found`)
   const event: HumanActionEvent = {
     kind: 'human_action',
     id: randomUUID(),
@@ -131,6 +117,17 @@ export async function decideGate(
     ...(reason !== undefined ? { reason } : {}),
     surface: 'review_queue',
   }
+  const decided = await runStore.decideGate({
+    runId,
+    gateId,
+    decision,
+    actor,
+    resolvedAt: now,
+    ...(reason !== undefined ? { reason } : {}),
+    source: 'via ops surface',
+    feedbackEvent: event,
+  })
+  if (!decided.feedbackEvents?.some((candidate) => candidate.id === event.id)) throw new Error('gate feedback was not persisted')
   await appendFeedbackEvent(clientId, event)
 }
 

@@ -19,8 +19,8 @@ import type {
  *  - MVD gate: a run on a module whose data isn't ready never starts
  *  - checkpointing: completed steps never re-execute; resume picks up mid-run
  *  - budgets: per-run credit/token caps from the manifest, hard-enforced
- *  - human gates: manifest approval policy decides block/notify/auto; blocked
- *    runs park as awaiting_approval and resume on resolution
+ *  - human gates: every declared gate blocks; runs park as awaiting_approval
+ *    and resume only after an attributed human resolution
  *  - journal: every event appended, nothing silent
  *
  * Step contract: steps are idempotent up to their gate call — a gated step
@@ -67,19 +67,24 @@ export class PipelineEngine {
       checkpoints: {},
       journal: [],
       gates: [],
+      feedbackEvents: [],
       spend: { clayCredits: 0, tokensUsd: 0 },
       createdAt: nowIso,
       updatedAt: nowIso,
     }
 
-    const gateCheck = moduleRunnable(manifest, pipeline.moduleId)
-    if (!gateCheck.runnable) {
-      run.status = 'blocked'
-      this.journal(run, null, 'run_blocked', gateCheck.reason)
-      await this.store.save(run)
-      return run
+    if ((pipeline.preflight ?? 'module_mvd') === 'module_mvd') {
+      const gateCheck = moduleRunnable(manifest, pipeline.moduleId)
+      if (!gateCheck.runnable) {
+        run.status = 'blocked'
+        this.journal(run, null, 'run_blocked', gateCheck.reason)
+        await this.store.save(run)
+        return run
+      }
+      this.journal(run, null, 'run_started', `module ${pipeline.moduleId}: ${gateCheck.reason}`)
+    } else {
+      this.journal(run, null, 'run_started', `data audit bootstrap for ${pipeline.moduleId}`)
     }
-    this.journal(run, null, 'run_started', `module ${pipeline.moduleId}: ${gateCheck.reason}`)
     return this.execute(pipeline, run, manifest)
   }
 
@@ -108,34 +113,37 @@ export class PipelineEngine {
     manifest: ClientManifest,
     reason?: string,
   ): Promise<RunRecord> {
-    const run = await this.store.get(runId)
-    if (!run) throw new Error(`run ${runId} not found`)
-    const gate = run.gates.find((g) => g.id === gateId)
+    const resolvedAt = this.now().toISOString()
+    const existing = await this.store.get(runId)
+    if (!existing) throw new Error(`run ${runId} not found`)
+    const gate = existing.gates.find((candidate) => candidate.id === gateId)
     if (!gate) throw new Error(`gate ${gateId} not found on run ${runId}`)
-    if (gate.status !== 'pending') throw new Error(`gate ${gateId} already ${gate.status}`)
-
-    gate.status = decision
-    gate.resolvedBy = actor
-    gate.resolvedAt = this.now().toISOString()
-    this.journal(run, gate.step, 'gate_resolved', `${gate.outputClass} ${decision} by ${actor}${reason ? `: ${reason}` : ''}`)
-    await this.store.save(run)
-
-    await this.options.onFeedbackEvent?.({
+    const feedbackEvent: HumanActionEvent = {
       kind: 'human_action',
       id: randomUUID(),
-      clientId: run.clientId,
-      occurredAt: gate.resolvedAt,
+      clientId: existing.clientId,
+      occurredAt: resolvedAt,
       actor,
       action: decision === 'approved' ? 'approve' : 'reject',
       machine: {
-        skillId: run.pipelineId,
-        runId: run.runId,
+        skillId: existing.pipelineId,
+        runId: existing.runId,
         itemRef: gateId,
         output: gate.payload,
       },
       ...(reason !== undefined ? { reason } : {}),
       surface: 'review_queue',
+    }
+    const run = await this.store.decideGate({
+      runId,
+      gateId,
+      decision,
+      actor,
+      resolvedAt,
+      ...(reason !== undefined ? { reason } : {}),
+      feedbackEvent,
     })
+    await this.options.onFeedbackEvent?.(feedbackEvent)
 
     return this.execute(pipeline, run, manifest)
   }
@@ -200,22 +208,26 @@ export class PipelineEngine {
       manifest,
       outputs: run.checkpoints,
       spendCredits: (n, why) => {
-        run.spend.clayCredits += n
-        journal('budget_spent', `${n} credits: ${why}`)
-        if (perRun.max_clay_credits !== null && run.spend.clayCredits > perRun.max_clay_credits) {
+        assertSpend(n, 'clay credits')
+        const next = run.spend.clayCredits + n
+        if (perRun.max_clay_credits !== null && next > perRun.max_clay_credits) {
           throw new BudgetExceededError(
-            `clay credits ${run.spend.clayCredits} exceed per-run cap ${perRun.max_clay_credits}`,
+            `clay credits ${next} exceed per-run cap ${perRun.max_clay_credits}`,
           )
         }
+        run.spend.clayCredits = next
+        journal('budget_spent', `${n} credits: ${why}`)
       },
       spendTokensUsd: (n, why) => {
-        run.spend.tokensUsd += n
-        journal('budget_spent', `$${n.toFixed(4)} tokens: ${why}`)
-        if (perRun.max_tokens_usd !== null && run.spend.tokensUsd > perRun.max_tokens_usd) {
+        assertSpend(n, 'token spend')
+        const next = run.spend.tokensUsd + n
+        if (perRun.max_tokens_usd !== null && next > perRun.max_tokens_usd) {
           throw new BudgetExceededError(
-            `token spend $${run.spend.tokensUsd.toFixed(4)} exceeds per-run cap $${perRun.max_tokens_usd}`,
+            `token spend $${next.toFixed(4)} exceeds per-run cap $${perRun.max_tokens_usd}`,
           )
         }
+        run.spend.tokensUsd = next
+        journal('budget_spent', `$${n.toFixed(4)} tokens: ${why}`)
       },
       gate: async (outputClass, payload) => {
         const gateId = `${stepId}:${outputClass}`
@@ -226,19 +238,18 @@ export class PipelineEngine {
           throw new GateBlockedSignal(gateId) // still pending
         }
         const policy = manifest.policies.approval[outputClass] ?? 'block'
-        if (policy === 'auto') return
         const record: GateRecord = {
           id: gateId,
           step: stepId,
           outputClass,
           payload,
-          status: policy === 'notify' ? 'approved' : 'pending',
-          resolvedBy: policy === 'notify' ? 'policy:notify' : null,
-          resolvedAt: policy === 'notify' ? this.now().toISOString() : null,
+          status: 'pending',
+          resolvedBy: null,
+          resolvedAt: null,
         }
         run.gates.push(record)
         journal('gate_opened', `${outputClass} (policy: ${policy})`)
-        if (policy === 'block') throw new GateBlockedSignal(gateId)
+        throw new GateBlockedSignal(gateId)
       },
     }
   }
@@ -247,4 +258,8 @@ export class PipelineEngine {
     run.journal.push({ at: this.now().toISOString(), step, event, detail })
     run.updatedAt = this.now().toISOString()
   }
+}
+
+function assertSpend(n: number, label: string): void {
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${label} must be a finite non-negative number`)
 }

@@ -68,6 +68,16 @@ describe('runDataAudit', () => {
     expect(report.duplicates.accountRecordsInGroups).toBe(2)
     expect(report.duplicates.accountDensity).toBeCloseTo(2 / 3)
   })
+
+  it('does not treat an empty extraction as healthy coverage', () => {
+    const report = runDataAudit([], [], { now: NOW })
+    expect(report.score).toBe(0)
+    expect(report.identifierCoverage.accountDomain).toBe(0)
+    expect(report.identifierCoverage.contactEmail).toBe(0)
+    expect(evaluateMvd(report, DEFAULT_MODULE_MVD['revops.enrichment']!).status).toBe('red')
+    expect(evaluateMvd(report, DEFAULT_MODULE_MVD['sales.reactivation']!).status).toBe('red')
+    expect(evaluateMvd(report, DEFAULT_MODULE_MVD['marketing.inbound']!).status).toBe('red')
+  })
 })
 
 describe('evaluateMvd', () => {

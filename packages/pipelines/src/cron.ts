@@ -31,8 +31,10 @@ function fieldMatches(field: string, value: number, min: number, max: number): b
 
 function partMatches(part: string, value: number, min: number, max: number): boolean {
   const [rangePart, stepPart] = part.split('/') as [string, string | undefined]
-  const step = stepPart !== undefined ? parseInt(stepPart, 10) : 1
-  if (Number.isNaN(step) || step < 1) throw new Error(`invalid cron step in "${part}"`)
+  if (part.split('/').length > 2) throw new Error(`invalid cron field "${part}"`)
+  if (stepPart !== undefined && !/^\d+$/.test(stepPart)) throw new Error(`invalid cron step in "${part}"`)
+  const step = stepPart !== undefined ? Number(stepPart) : 1
+  if (!Number.isInteger(step) || step < 1) throw new Error(`invalid cron step in "${part}"`)
 
   let lo: number
   let hi: number
@@ -40,17 +42,20 @@ function partMatches(part: string, value: number, min: number, max: number): boo
     lo = min
     hi = max
   } else if (rangePart.includes('-')) {
-    const [a, b] = rangePart.split('-').map((n) => parseInt(n, 10)) as [number, number]
-    if (Number.isNaN(a) || Number.isNaN(b)) throw new Error(`invalid cron range "${part}"`)
+    const pieces = rangePart.split('-')
+    if (pieces.length !== 2 || !pieces.every((n) => /^\d+$/.test(n))) throw new Error(`invalid cron range "${part}"`)
+    const [a, b] = pieces.map(Number) as [number, number]
+    if (a < min || a > max || b < min || b > max || a > b) throw new Error(`cron range out of bounds "${part}"`)
     lo = a
     hi = b
   } else {
-    const n = parseInt(rangePart, 10)
-    if (Number.isNaN(n)) throw new Error(`invalid cron value "${part}"`)
+    if (!/^\d+$/.test(rangePart)) throw new Error(`invalid cron value "${part}"`)
+    const n = Number(rangePart)
+    if (n < min || n > max) throw new Error(`cron value out of bounds "${part}"`)
     // day-of-week 7 == 0 (Sunday)
     const normalized = max === 7 && n === 7 ? 0 : n
     return stepPart === undefined ? value === normalized : value >= normalized && (value - normalized) % step === 0
   }
-  const v = max === 7 && value === 7 ? 0 : value
-  return v >= lo && v <= hi && (v - lo) % step === 0
+  const candidates = max === 7 && value === 0 ? [0, 7] : [value]
+  return candidates.some((v) => v >= lo && v <= hi && (v - lo) % step === 0)
 }

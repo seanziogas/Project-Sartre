@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { ClientManifest } from '@sartre/core'
+import type { ClientManifest, HumanActionEvent } from '@sartre/core'
 
 /**
  * Pipeline engine types (Layer 4). A pipeline is a declared sequence of
@@ -68,14 +68,29 @@ export interface RunRecord {
   checkpoints: Record<string, unknown>
   journal: JournalEntry[]
   gates: GateRecord[]
+  /** Durable Layer-8 events captured atomically with gate decisions. */
+  feedbackEvents?: HumanActionEvent[]
   spend: BudgetSpend
   createdAt: string
   updatedAt: string
 }
 
+export interface GateDecisionInput {
+  runId: string
+  gateId: string
+  decision: 'approved' | 'rejected'
+  actor: string
+  resolvedAt: string
+  reason?: string
+  source?: string
+  feedbackEvent?: HumanActionEvent
+}
+
 export interface RunStore {
   get(runId: string): Promise<RunRecord | null>
   save(run: RunRecord): Promise<void>
+  /** Atomically transition one pending gate; competing decisions must fail. */
+  decideGate(input: GateDecisionInput): Promise<RunRecord>
 }
 
 /** What the runner service needs beyond basic get/save. */
@@ -92,9 +107,40 @@ export class MemoryRunStore implements RunnerStore {
   async save(run: RunRecord): Promise<void> {
     this.runs.set(run.runId, structuredClone(run))
   }
+  async decideGate(input: GateDecisionInput): Promise<RunRecord> {
+    const run = this.runs.get(input.runId)
+    if (!run) throw new Error(`run ${input.runId} not found`)
+    applyGateDecision(run, input)
+    this.runs.set(run.runId, structuredClone(run))
+    return structuredClone(run)
+  }
   async listByStatus(status: RunStatus): Promise<RunRecord[]> {
     return [...this.runs.values()].filter((r) => r.status === status).map((r) => structuredClone(r))
   }
+}
+
+export function applyGateDecision(run: RunRecord, input: GateDecisionInput): RunRecord {
+  const gate = run.gates.find((g) => g.id === input.gateId)
+  if (!gate) throw new Error(`gate ${input.gateId} not found on run ${run.runId}`)
+  if (gate.status !== 'pending') throw new Error(`gate ${input.gateId} already ${gate.status}`)
+  if (input.actor.trim() === '') throw new Error('gate decision actor is required')
+  if (input.feedbackEvent) {
+    if (input.feedbackEvent.clientId !== run.clientId || input.feedbackEvent.machine.runId !== run.runId || input.feedbackEvent.machine.itemRef !== input.gateId) {
+      throw new Error('feedback event does not match the gate decision')
+    }
+  }
+  gate.status = input.decision
+  gate.resolvedBy = input.actor
+  gate.resolvedAt = input.resolvedAt
+  run.journal.push({
+    at: input.resolvedAt,
+    step: gate.step,
+    event: 'gate_resolved',
+    detail: `${gate.outputClass} ${input.decision} by ${input.actor}${input.reason ? `: ${input.reason}` : ''}${input.source ? ` (${input.source})` : ''}`,
+  })
+  run.updatedAt = input.resolvedAt
+  if (input.feedbackEvent) (run.feedbackEvents ??= []).push(input.feedbackEvent)
+  return run
 }
 
 /** What a step sees. Budget spends throw when the cap is hit. */
@@ -109,8 +155,8 @@ export interface StepContext {
   /** Record token spend in USD; throws BudgetExceededError past the cap. */
   spendTokensUsd(n: number, why: string): void
   /**
-   * Human gate. Policy comes from the manifest: 'block' pauses the run until
-   * approval; 'notify' journals and continues; 'auto' continues silently.
+   * Human gate. The manifest policy is structurally `block`; the run pauses
+   * until an attributed human decision resolves it.
    * When blocked, the step's work so far MUST already be in its return value —
    * the gate is the last thing a step does before its output ships.
    */
@@ -126,6 +172,12 @@ export interface PipelineDefinition {
   id: string
   /** Canonical module id — MVD-gated via manifest before any step runs. */
   moduleId: string
+  /**
+   * The Day-1 data audit creates MVD and therefore cannot depend on MVD or
+   * module activation. This explicit mode is reserved for non-CRM-mutating
+   * data-foundation pipelines; all ordinary pipelines default to module_mvd.
+   */
+  preflight?: 'module_mvd' | 'data_audit'
   steps: PipelineStep[]
 }
 

@@ -38,10 +38,10 @@ export function renderEngagementReport(input: EngagementReportInput): string {
   const { baseline, current } = input
   const overall = computeReviewMetrics(input.feedbackEvents)
   const series = metricsByPeriod(input.feedbackEvents)
-  const delta = (b: number, c: number, asPct = true) => {
-    const d = c - b
-    const fmt = asPct ? (n: number) => `${Math.round(n * 100)}%` : (n: number) => `${n}`
-    return `${fmt(b)} → ${fmt(c)} (${d >= 0 ? '+' : ''}${asPct ? Math.round(d * 100) : d}${asPct ? 'pt' : ''})`
+  const pct = (n: number) => `${Math.round(n * 100)}%`
+  const pointDelta = (before: number, after: number) => {
+    const points = Math.round((after - before) * 100)
+    return `${points >= 0 ? '+' : ''}${points}pt`
   }
 
   return [
@@ -52,9 +52,9 @@ export function renderEngagementReport(input: EngagementReportInput): string {
     `| metric | ${baseline.date} | ${current.date} |`,
     '|---|---|---|',
     `| Health score | ${baseline.score}/100 | ${current.score}/100 (${current.score - baseline.score >= 0 ? '+' : ''}${current.score - baseline.score}) |`,
-    `| Account domain coverage | ${delta(baseline.accountDomainCoverage, current.accountDomainCoverage)} |`.replace('| Account', '| Account').replace(' |', ' |'),
-    `| Contact email coverage | ${delta(baseline.contactEmailCoverage, current.contactEmailCoverage)} |`,
-    `| Duplicate density | ${delta(baseline.duplicateDensity, current.duplicateDensity)} |`,
+    `| Account domain coverage | ${pct(baseline.accountDomainCoverage)} | ${pct(current.accountDomainCoverage)} (${pointDelta(baseline.accountDomainCoverage, current.accountDomainCoverage)}) |`,
+    `| Contact email coverage | ${pct(baseline.contactEmailCoverage)} | ${pct(current.contactEmailCoverage)} (${pointDelta(baseline.contactEmailCoverage, current.contactEmailCoverage)}) |`,
+    `| Duplicate density | ${pct(baseline.duplicateDensity)} | ${pct(current.duplicateDensity)} (${pointDelta(baseline.duplicateDensity, current.duplicateDensity)}) |`,
     '',
     '## The machine is earning trust',
     '',

@@ -42,6 +42,7 @@ describe('enrichment-refresh pipeline (Day-1 Audit + always-on hygiene)', () => 
       fillRates: [],
       scoreBreakdown: [],
     } as unknown as DataHealthReport
+    let storedReport: DataHealthReport | null = previousReport
 
     const pipeline = buildEnrichmentRefreshPipeline({
       pullAccounts: async () => [
@@ -51,16 +52,21 @@ describe('enrichment-refresh pipeline (Day-1 Audit + always-on hygiene)', () => 
       pullContacts: async () => [
         { id: 'c1', firstName: 'J', lastName: 'D', email: 'j@a.com', linkedinUrl: null, companyName: 'A', accountRef: null, ownerRef: 'rep', updatedAt: '2026-06-01T00:00:00Z' },
       ],
-      loadPreviousReport: async () => previousReport,
-      saveReport: async (client, report) => { saved.report = report; saved.reportClient = client },
+      loadPreviousReport: async () => storedReport,
+      saveReport: async (client, report) => { saved.report = report; saved.reportClient = client; storedReport = report },
       saveMvd: async (_c, mvd) => { saved.mvd = mvd },
       notify: async (_c, subject, body) => { notifications.push(`${subject}\n${body}`) },
       now: NOW,
     })
 
-    const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW })
-    const run = await engine.start(pipeline, manifest('revops.enrichment'), 'Acme')
+    const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW, runId: 'audit-r1' })
+    const fresh = parseManifest(readFileSync(templatePath, 'utf8'))
+    const parked = await engine.start(pipeline, fresh, 'Acme')
 
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: 'monitor:client_comms', status: 'pending' })
+    expect(notifications).toHaveLength(0)
+    const run = await engine.resolveGate(pipeline, 'audit-r1', 'monitor:client_comms', 'approved', 'gtme@kiln', fresh)
     expect(run.status).toBe('completed')
     expect((saved.report as DataHealthReport).counts.accounts).toBe(2)
     const mvd = saved.mvd as Record<string, MvdStatus>
@@ -69,7 +75,6 @@ describe('enrichment-refresh pipeline (Day-1 Audit + always-on hygiene)', () => 
     expect(mvd['revops.remediation']!.status).toBe('green') // remediation never blocked
     expect(notifications).toHaveLength(1)
     expect(notifications[0]).toContain('DRIFT')
-    expect(notifications[0]).toContain('CONTRACT')
   })
 })
 
@@ -136,6 +141,20 @@ describe('closed-lost reactivation pipeline', () => {
     expect(enrolled[0]!.map((r) => r.id)).toEqual(['won1'])
     expect((done.checkpoints.enroll as { enrolled: number }).enrolled).toBe(1)
   })
+
+  it('rejects an unaffordable run before calling the model', async () => {
+    let calls = 0
+    const pipeline = buildReactivationPipeline({
+      ...deps([]),
+      llm: { complete: async () => { calls++; return '[]' } },
+    })
+    const m = manifest('sales.reactivation')
+    m.budgets.per_run_defaults.max_tokens_usd = 0.01
+    const run = await new PipelineEngine(new MemoryRunStore()).start(pipeline, m, 'Acme')
+    expect(run.status).toBe('failed')
+    expect(calls).toBe(0)
+    expect(run.spend.tokensUsd).toBe(0)
+  })
 })
 
 describe('inbound routing pipeline', () => {
@@ -200,5 +219,25 @@ describe('inbound routing pipeline', () => {
     expect(done.status).toBe('completed')
     expect(written).toHaveLength(1)
     expect((done.checkpoints.writeback as { written: number }).written).toBe(1)
+  })
+
+  it('honors a zero-credit cap before calling the provider', async () => {
+    let providerCalls = 0
+    const cache = new EnrichmentCache(new MemoryCacheStore(), NOW)
+    const pipeline = buildInboundRoutingPipeline({
+      pullNewLeads: async () => [{ id: 'l1', domain: 'new.io', name: 'New', raw: {} }],
+      enrichment: { cache, provider: async () => { providerCalls++; return {} } },
+      fieldsWanted: ['industry'],
+      clayCreditsPerProviderCall: 2,
+      routingRules: { rules: [], defaultOwner: null },
+      toRoutingFields: () => ({}),
+      writeAssignments: async () => 0,
+    })
+    const m = manifest('marketing.inbound')
+    m.budgets.per_run_defaults.max_clay_credits = 0
+    const run = await new PipelineEngine(new MemoryRunStore()).start(pipeline, m, 'Acme')
+    expect(providerCalls).toBe(0)
+    expect(run.spend.clayCredits).toBe(0)
+    expect((run.checkpoints.enrich as { budgetExhaustedRowIds: string[] }).budgetExhaustedRowIds).toEqual(['l1'])
   })
 })

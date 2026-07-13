@@ -34,7 +34,12 @@ export function buildEnrichmentRefreshPipeline(deps: EnrichmentRefreshDeps): Pip
   return {
     id: 'enrichment-refresh@0.1.0',
     moduleId: 'revops.enrichment',
+    preflight: 'data_audit',
     steps: [
+      {
+        id: 'previous-report',
+        run: async (ctx) => deps.loadPreviousReport(ctx.clientId),
+      },
       {
         id: 'pull',
         run: async () => {
@@ -74,18 +79,20 @@ export function buildEnrichmentRefreshPipeline(deps: EnrichmentRefreshDeps): Pip
             .filter(([, m]) => m.enabled)
             .map(([id]) => id)
           const violations = evaluateContracts(report, contractsFromModules(enabled))
-          const previous = await deps.loadPreviousReport(ctx.clientId)
+          const previous = ctx.outputs['previous-report'] as DataHealthReport | null
           const drift = previous ? detectDrift(previous, report) : []
 
           const result = { violations, drift, score: report.score }
           if (violations.length > 0 || drift.length > 0) {
-            await ctx.gate('internal_report', result) // policy: auto by default — journals nothing, notify carries it
             const lines = [
               `Data health: ${report.score}/100.`,
               ...violations.map((v) => `CONTRACT: ${v.metric} at ${Math.round(v.actual * 100)}% (floor ${Math.round(v.min * 100)}%)`),
               ...drift.map((d) => `DRIFT [${d.severity}]: ${d.metric} ${d.before} → ${d.after}`),
             ]
-            await deps.notify(ctx.clientId, 'Data health alert', lines.join('\n'))
+            const subject = 'Data health alert'
+            const body = lines.join('\n')
+            await ctx.gate('client_comms', { subject, body, report: result })
+            await deps.notify(ctx.clientId, subject, body)
           }
           return result
         },

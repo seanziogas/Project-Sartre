@@ -67,6 +67,12 @@ describe('aggregateOutcomes + thompsonAllocate (speed 3a)', () => {
     expect(md).toContain('Mix changes only')
     expect(md).toContain('| timing | 100% |')
   })
+
+  it('keeps allocations normalized when the configured floor is impossible', () => {
+    const stats = Array.from({ length: 25 }, (_, i) => ({ variant: `v${i}`, successes: 1, failures: 1 }))
+    const allocations = thompsonAllocate(stats, { rng: seededRng(1), draws: 100 })
+    expect(allocations.reduce((sum, item) => sum + item.share, 0)).toBeCloseTo(1, 6)
+  })
 })
 
 describe('recalibrateIcp (speed 3b)', () => {
@@ -119,7 +125,7 @@ describe('renderEngagementReport', () => {
       runs: { totalRuns: 14, completed: 11, awaitingApproval: 2, failed: 1, clayCredits: 2140, tokensUsd: 18.4 },
     })
     expect(md).toContain('61/100 | 84/100 (+23)')
-    expect(md).toContain('60% → 91% (+31pt)')
+    expect(md).toContain('| Account domain coverage | 60% | 91% (+31pt) |')
     expect(md).toContain('| 2026-W27 | 1 | 0% |')
     expect(md).toContain('| 2026-W28 | 1 | 100% |')
     expect(md).toContain('2,140 Clay credits')

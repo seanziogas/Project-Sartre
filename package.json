@@ -12,9 +12,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -b packages/*",
+    "build": "tsc -b packages/* apps/runner && npm run build --workspace @sartre/ops",
     "test": "vitest run",
-    "typecheck": "tsc -b packages/*"
+    "typecheck": "tsc -b packages/* apps/runner && tsc --noEmit -p apps/ops/tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -95,7 +95,7 @@ export async function buildBrain(
             : sourceBlock,
         maxTokens: 32000,
       })
-      const check = validateDraft(raw, spec.docType, clientName)
+      const check = validateDraft(raw, spec.docType, clientName, options.today, sources.map((source) => source.label))
       if (check.ok) {
         drafts.push({ file: spec.file, markdown: raw.trim() + '\n', frontmatter: check.frontmatter })
         done = true
@@ -138,6 +138,8 @@ function validateDraft(
   raw: string,
   docType: string,
   clientName: string,
+  today: string,
+  sourceLabels: string[],
 ): { ok: true; frontmatter: BrainFrontmatter } | { ok: false; problems: string[] } {
   let parsed
   try {
@@ -154,6 +156,24 @@ function validateDraft(
   }
   if (parsed.frontmatter.status !== 'draft') {
     problems.push('status must be "draft" — only a human approval flips a brain doc active')
+  }
+  if (parsed.frontmatter.updated !== today) problems.push(`updated must be "${today}"`)
+  if (docType === 'grading' && !parsed.frontmatter.posture) {
+    problems.push('draft grading doc must declare posture (generous | strict)')
+  }
+  if (docType === 'use-cases' && (!parsed.frontmatter.vocabulary || parsed.frontmatter.vocabulary.length === 0)) {
+    problems.push('draft use-cases doc must declare a non-empty vocabulary')
+  }
+  const knownSources = new Set(sourceLabels)
+  const verified = [...parsed.body.matchAll(/\[VERIFIED:\s*([^\]]+)\]/g)].map((match) => match[1]!.trim())
+  if (verified.length === 0) problems.push('body must contain at least one [VERIFIED: <source label>] attribution')
+  for (const label of parsed.frontmatter.sources) {
+    if (!knownSources.has(label)) problems.push(`frontmatter source "${label}" was not provided`)
+    if (!verified.includes(label)) problems.push(`frontmatter source "${label}" is not cited in a [VERIFIED] tag`)
+  }
+  for (const label of verified) {
+    if (!knownSources.has(label)) problems.push(`[VERIFIED] cites unknown source "${label}"`)
+    if (!parsed.frontmatter.sources.includes(label)) problems.push(`[VERIFIED] source "${label}" is missing from frontmatter sources`)
   }
   if (parsed.body.trim().length < 100) {
     problems.push('body is implausibly short')

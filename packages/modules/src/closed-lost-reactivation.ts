@@ -35,8 +35,10 @@ export function buildReactivationPipeline(deps: ReactivationDeps): PipelineDefin
         id: 'grade',
         run: async (ctx) => {
           const rows = await deps.pullClosedLost()
-          const result = await listGrader.gradeList(rows, deps.graderConfig, deps.llm)
+          // Reserve the configured estimate before making any paid calls so a
+          // run that cannot fit its budget never reaches the model.
           ctx.spendTokensUsd(rows.length * deps.tokenUsdPerRow, `graded ${rows.length} closed-lost accounts`)
+          const result = await listGrader.gradeList(rows, deps.graderConfig, deps.llm)
           return result
         },
       },

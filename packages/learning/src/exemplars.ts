@@ -19,7 +19,6 @@ export interface Exemplar {
 
 const TEACHES_BY_ACTION: Partial<Record<HumanActionEvent['action'], Exemplar['teaches']>> = {
   grade_override: 'grading',
-  reject: 'grading',
   approve_with_edit: 'voice',
   routing_correction: 'routing',
   list_removal: 'grading',
@@ -33,7 +32,7 @@ const TEACHES_BY_ACTION: Partial<Record<HumanActionEvent['action'], Exemplar['te
 export function extractExemplars(events: HumanActionEvent[], clientName: string): Exemplar[] {
   const exemplars: Exemplar[] = []
   for (const event of events) {
-    const teaches = TEACHES_BY_ACTION[event.action]
+    const teaches = teachesFor(event)
     if (!teaches) continue
     if (!event.reason || event.reason.trim() === '') continue
 
@@ -47,6 +46,22 @@ export function extractExemplars(events: HumanActionEvent[], clientName: string)
     })
   }
   return exemplars
+}
+
+function teachesFor(event: HumanActionEvent): Exemplar['teaches'] | undefined {
+  const direct = TEACHES_BY_ACTION[event.action]
+  if (direct) return direct
+  if (event.action !== 'reject') return undefined
+  if (/:(outbound_send|client_comms)$/.test(event.machine.itemRef)) return 'voice'
+  if (/:crm_write$/.test(event.machine.itemRef) && hasOwner(event.machine.output)) return 'routing'
+  if (/grader|grading/i.test(event.machine.skillId)) return 'grading'
+  return undefined
+}
+
+function hasOwner(output: unknown): boolean {
+  if (typeof output !== 'object' || output === null) return false
+  const record = output as Record<string, unknown>
+  return 'owner' in record || 'assignments' in record
 }
 
 function renderExemplar(

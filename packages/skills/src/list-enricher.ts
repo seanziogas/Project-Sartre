@@ -62,6 +62,10 @@ export async function enrichList(
 ): Promise<EnrichListResult> {
   const maxAgeDays = options.maxAgeDays ?? 180
   const budget = options.maxProviderCalls ?? null
+  if (!Number.isFinite(maxAgeDays) || maxAgeDays < 0) throw new Error('maxAgeDays must be a finite non-negative number')
+  if (budget !== null && (!Number.isInteger(budget) || budget < 0)) {
+    throw new Error('maxProviderCalls must be a non-negative integer or null')
+  }
   let providerCalls = 0
   let cacheHits = 0
   const budgetExhausted: string[] = []

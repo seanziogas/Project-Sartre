@@ -1,6 +1,8 @@
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { RunRecord, RunnerStore, RunStatus } from './types.js'
+import { randomUUID } from 'node:crypto'
+import { applyGateDecision } from './types.js'
+import type { GateDecisionInput, RunRecord, RunnerStore, RunStatus } from './types.js'
 
 /**
  * File-backed run store: one JSON file per run under <dir>/<clientId>/runs/.
@@ -35,7 +37,22 @@ export class FileRunStore implements RunnerStore {
   async save(run: RunRecord): Promise<void> {
     const path = this.runPath(run.clientId, run.runId)
     await mkdir(join(this.dir, sanitize(run.clientId), 'runs'), { recursive: true })
-    await writeFile(path, JSON.stringify(run, null, 2))
+    await atomicWrite(path, JSON.stringify(run, null, 2))
+  }
+
+  async decideGate(input: GateDecisionInput): Promise<RunRecord> {
+    const existing = await this.get(input.runId)
+    if (!existing) throw new Error(`run ${input.runId} not found`)
+    const path = this.runPath(existing.clientId, existing.runId)
+    const release = await acquireLock(`${path}.lock`)
+    try {
+      const current = JSON.parse(await readFile(path, 'utf8')) as RunRecord
+      applyGateDecision(current, input)
+      await atomicWrite(path, JSON.stringify(current, null, 2))
+      return current
+    } finally {
+      await release()
+    }
   }
 
   async list(clientId: string): Promise<RunRecord[]> {
@@ -74,6 +91,37 @@ export class FileRunStore implements RunnerStore {
       return []
     }
   }
+}
+
+async function atomicWrite(path: string, contents: string): Promise<void> {
+  const tmp = `${path}.${randomUUID()}.tmp`
+  try {
+    await writeFile(tmp, contents)
+    await rename(tmp, path)
+  } finally {
+    await unlink(tmp).catch(() => undefined)
+  }
+}
+
+async function acquireLock(path: string): Promise<() => Promise<void>> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      const handle = await open(path, 'wx')
+      return async () => {
+        await handle.close()
+        await unlink(path).catch(() => undefined)
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+      const lockStat = await stat(path).catch(() => null)
+      if (lockStat && Date.now() - lockStat.mtimeMs > 30_000) {
+        await unlink(path).catch(() => undefined)
+        continue
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+  }
+  throw new Error(`timed out acquiring run lock ${path}`)
 }
 
 /** Keep ids filesystem-safe; anything exotic is flattened, never traversed. */

@@ -111,7 +111,21 @@ describe('gradeList — eval set', () => {
     // missing-row problem forces retries; model keeps omitting row b
     const llm = new ScriptedLlm([partial, partial, partial])
     const result = await gradeList(ROWS, CONFIG, llm)
-    expect(result.ungraded).toEqual(['b'])
+    expect(result.grades).toEqual([]) // incomplete batches never flow downstream
+    expect(result.ungraded).toEqual(['a', 'b'])
+  })
+
+  it('rejects duplicate and invented output ids', async () => {
+    const invalid = JSON.stringify([
+      { id: 'a', score: 80, labels: { industry: 'Fleet' }, reasoning: 'x' },
+      { id: 'a', score: 70, labels: { industry: 'Fleet' }, reasoning: 'duplicate' },
+      { id: 'b', score: 60, labels: { industry: 'Other' }, reasoning: 'y' },
+      { id: 'invented', score: 90, labels: { industry: 'Fleet' }, reasoning: 'z' },
+    ])
+    const result = await gradeList(ROWS, { ...CONFIG, maxRetries: 1 }, new ScriptedLlm([invalid]))
+    expect(result.grades).toEqual([])
+    expect(result.journal[0]!.attempts[0]!.issues.join(' ')).toContain('duplicate grade')
+    expect(result.journal[0]!.attempts[0]!.issues.join(' ')).toContain('not present in the input')
   })
 
   it('processes multiple batches with progress callbacks', async () => {

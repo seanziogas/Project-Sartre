@@ -42,7 +42,7 @@ policies:
     crm_write: block
     client_comms: block
     brain_change: block # includes Layer-8 proposed diffs
-    internal_report: auto
+    internal_report: block
   learning:
     capture: true
     exemplar_memory: true

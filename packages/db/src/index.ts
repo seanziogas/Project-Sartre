@@ -1,6 +1,7 @@
 import type { FeedbackEvent } from '@sartre/core'
 import type { CacheEntry, CacheStore } from '@sartre/connectors'
-import type { RunnerStore, RunRecord, RunStatus } from '@sartre/pipelines'
+import { applyGateDecision } from '@sartre/pipelines'
+import type { GateDecisionInput, RunnerStore, RunRecord, RunStatus } from '@sartre/pipelines'
 
 /**
  * Postgres adapters (Phase 2). Storage-shape decisions:
@@ -64,6 +65,23 @@ export class PostgresRunStore implements RunnerStore {
          SET status = EXCLUDED.status, doc = EXCLUDED.doc, updated_at = EXCLUDED.updated_at`,
       [run.runId, run.clientId, run.pipelineId, run.moduleId, run.status, JSON.stringify(run), run.createdAt, run.updatedAt],
     )
+  }
+
+  async decideGate(input: GateDecisionInput): Promise<RunRecord> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const current = await this.get(input.runId)
+      if (!current) throw new Error(`run ${input.runId} not found`)
+      const original = JSON.stringify(current)
+      applyGateDecision(current, input)
+      const { rows } = await this.db.query(
+        `UPDATE runs SET status = $2, doc = $3, updated_at = $4
+         WHERE run_id = $1 AND doc = $5::jsonb
+         RETURNING doc`,
+        [current.runId, current.status, JSON.stringify(current), current.updatedAt, original],
+      )
+      if (rows.length > 0) return (rows[0] as { doc: RunRecord }).doc
+    }
+    throw new Error(`run ${input.runId} changed while deciding gate ${input.gateId}`)
   }
 
   async list(clientId: string): Promise<RunRecord[]> {

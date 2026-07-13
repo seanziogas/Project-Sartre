@@ -22,6 +22,11 @@ describe('parseManifest', () => {
   it('rejects invalid YAML with a helpful error', () => {
     expect(() => parseManifest(':::not yaml:::')).toThrow(ManifestError)
   })
+
+  it('rejects auto-approval policies', () => {
+    const unsafe = readFileSync(templatePath, 'utf8').replace('internal_report: block', 'internal_report: auto')
+    expect(() => parseManifest(unsafe)).toThrow(ManifestError)
+  })
 })
 
 describe('moduleRunnable', () => {

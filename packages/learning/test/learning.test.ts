@@ -46,6 +46,23 @@ describe('extractExemplars (speed 1)', () => {
     expect(exemplars[0]!.markdown).toContain('"score": 10')
     expect(exemplars[0]!.markdown).toContain('approved_by: ""') // human gate intact
   })
+
+  it('routes reasoned rejections to the brain area implied by the gate', () => {
+    const exemplars = extractExemplars([
+      event({
+        action: 'reject',
+        reason: 'Tone is too aggressive',
+        machine: { skillId: 'campaign-factory@0.1.0', runId: 'r2', itemRef: 'draft:outbound_send', output: {} },
+      }),
+      event({
+        action: 'reject',
+        reason: 'Informational report is stale',
+        machine: { skillId: 'metrics@0.1.0', runId: 'r3', itemRef: 'report:internal_report', output: {} },
+      }),
+    ], 'Acme')
+    expect(exemplars).toHaveLength(1)
+    expect(exemplars[0]!.teaches).toBe('voice')
+  })
 })
 
 describe('proposeTuning (speed 2)', () => {

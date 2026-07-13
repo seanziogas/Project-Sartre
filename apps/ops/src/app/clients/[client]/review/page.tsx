@@ -13,7 +13,9 @@ export default async function ReviewQueue({ params }: { params: Promise<{ client
 
   async function decide(formData: FormData) {
     'use server'
-    const decision = formData.get('decision') as 'approved' | 'rejected'
+    const rawDecision = formData.get('decision')
+    if (rawDecision !== 'approved' && rawDecision !== 'rejected') throw new Error('invalid gate decision')
+    const decision = rawDecision
     const actor = String(formData.get('actor') ?? '').trim()
     if (!actor) throw new Error('reviewer name required — approvals must be attributed')
     const reason = String(formData.get('reason') ?? '').trim() || undefined

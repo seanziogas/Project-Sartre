@@ -19,7 +19,7 @@ const SOURCES: BrainSource[] = [
   { kind: 'transcript', label: '2026-07-01-kickoff', text: 'We target fleet companies.' },
 ]
 
-const body = 'Grounded content [VERIFIED: acme-website]. '.repeat(5)
+const body = 'Grounded content [VERIFIED: acme-website]. Interview context [VERIFIED: 2026-07-01-kickoff]. '.repeat(3)
 
 function doc(docType: string, extra = ''): string {
   return `---
@@ -84,5 +84,13 @@ describe('buildBrain — eval set', () => {
     const result = await buildBrain('Acme', SOURCES, llm, { today: '2026-07-09' })
     expect(result.failed).toEqual([])
     expect(llm.calls[1]!.user).toContain('implausibly short')
+  })
+
+  it('rejects drafts that cite sources not supplied to the build', async () => {
+    const ungrounded = doc('company').replaceAll('acme-website', 'invented-source')
+    const llm = new ScriptedLlm([ungrounded, ungrounded, ungrounded, ...GOOD.slice(1)])
+    const result = await buildBrain('Acme', SOURCES, llm, { today: '2026-07-09' })
+    expect(result.failed[0]!.problems.join(' ')).toContain('was not provided')
+    expect(result.failed[0]!.problems.join(' ')).toContain('unknown source')
   })
 })

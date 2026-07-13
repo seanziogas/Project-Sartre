@@ -21,7 +21,7 @@ function moduleDeps(): RunnerModuleDeps {
     notify: async () => undefined,
   }
   const reactivation = {
-    pullClosedLost: async () => [],
+    loadCanonicalClosedLost: async () => [],
     graderConfig: { brainContext: '', vocabularies: {}, reviewerRules: [] },
     tokenUsdPerRow: 0.01,
     minScore: 50,

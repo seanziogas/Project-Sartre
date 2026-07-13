@@ -14,7 +14,8 @@ import type { ClientDeps } from './client-deps.js'
  */
 
 export interface ReactivationDeps {
-  pullClosedLost(): Promise<listGrader.GraderRow[]>
+  /** Tenant-scoped projection from canonical accounts/opportunities. */
+  loadCanonicalClosedLost(clientId: string): Promise<listGrader.GraderRow[]>
   graderConfig: listGrader.GraderConfig
   llm: LlmClient
   /** Estimated token cost per graded row, for budget tracking. */
@@ -37,7 +38,7 @@ export function buildReactivationPipeline(source: ClientDeps<ReactivationDeps>):
         id: 'grade',
         run: async (ctx) => {
           const deps = await resolveClientDeps(source, ctx.clientId)
-          const rows = await deps.pullClosedLost()
+          const rows = await deps.loadCanonicalClosedLost(ctx.clientId)
           // Reserve the configured estimate before making any paid calls so a
           // run that cannot fit its budget never reaches the model.
           ctx.spendTokensUsd(rows.length * deps.tokenUsdPerRow, `graded ${rows.length} closed-lost accounts`)

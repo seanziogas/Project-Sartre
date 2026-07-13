@@ -264,6 +264,38 @@ describe('PostgresCanonicalStore (against PGlite)', () => {
         { Id: 'ref-contact-2', FirstName: 'Tenant', LastName: 'Boundary', Email: 'boundary@reference.example', AccountId: 'cross-tenant-only', OwnerId: 'rep-1', LastModified: extractedAt },
       ],
     }
+    const opportunityBatch = {
+      connectorId: 'salesforce',
+      object: 'opportunity' as const,
+      extractedAt,
+      cursor: null,
+      rows: [{
+        Id: 'ref-opportunity-1',
+        AccountId: 'ref-account-1',
+        Name: 'Reference renewal',
+        StageName: 'Closed Lost',
+        Amount: 250000,
+        CloseDate: '2026-06-30T00:00:00Z',
+        IsClosed: true,
+        IsWon: false,
+        LossReason: 'Timing',
+      }],
+    }
+    const activityBatch = {
+      connectorId: 'salesforce',
+      object: 'activity' as const,
+      extractedAt,
+      cursor: null,
+      rows: [{
+        Id: 'ref-activity-1',
+        AccountId: 'ref-account-1',
+        ContactId: 'ref-contact-1',
+        Type: 'meeting',
+        ActivityDate: '2026-07-12T10:00:00Z',
+        Direction: 'inbound',
+        Summary: 'Revisit next quarter',
+      }],
+    }
     const accountMapping = {
       object: 'account',
       externalIdField: 'Id',
@@ -286,14 +318,54 @@ describe('PostgresCanonicalStore (against PGlite)', () => {
       ],
       references: [{ source: 'AccountId', target: 'accountId', recordType: 'account', required: true }],
     }
+    const opportunityMapping = {
+      object: 'opportunity',
+      externalIdField: 'Id',
+      fields: [
+        { source: 'Name', target: 'name', transform: 'trim' },
+        { source: 'StageName', target: 'stage', transform: 'trim' },
+        { source: 'Amount', target: 'amountUsd', transform: 'number' },
+        { source: 'CloseDate', target: 'closeDate', transform: 'datetime' },
+        { source: 'IsClosed', target: 'isClosed', transform: 'boolean' },
+        { source: 'IsWon', target: 'isWon', transform: 'boolean' },
+        { source: 'LossReason', target: 'lossReason', transform: 'trim' },
+      ],
+      references: [{ source: 'AccountId', target: 'accountId', recordType: 'account', required: true }],
+    }
+    const activityMapping = {
+      object: 'activity',
+      externalIdField: 'Id',
+      fields: [
+        { source: 'Type', target: 'type', transform: 'trim', required: true },
+        { source: 'ActivityDate', target: 'occurredAt', transform: 'datetime', required: true },
+        { source: 'Direction', target: 'direction', transform: 'trim' },
+        { source: 'Summary', target: 'summary', transform: 'trim' },
+      ],
+      references: [
+        { source: 'AccountId', target: 'accountId', recordType: 'account' },
+        { source: 'ContactId', target: 'contactId', recordType: 'contact' },
+      ],
+    }
     const ids = [
       '00000000-0000-4000-8000-000000000401',
       '00000000-0000-4000-8000-000000000402',
       '00000000-0000-4000-8000-000000000403',
+      '00000000-0000-4000-8000-000000000404',
+      '00000000-0000-4000-8000-000000000405',
     ]
     const result = await coordinator.refresh(
       'ReferenceClient',
-      { accountBatch, contactBatch, accountMapping, contactMapping, runId: 'ingestion-run-1' },
+      {
+        accountBatch,
+        contactBatch,
+        opportunityBatch,
+        activityBatch,
+        accountMapping,
+        contactMapping,
+        opportunityMapping,
+        activityMapping,
+        runId: 'ingestion-run-1',
+      },
       { now: () => new Date('2026-07-13T13:00:00Z'), createId: () => ids.shift()! },
     )
 
@@ -305,12 +377,49 @@ describe('PostgresCanonicalStore (against PGlite)', () => {
     expect(result.contacts.problems).toEqual(expect.arrayContaining([
       expect.objectContaining({ problem: expect.stringContaining('unresolved account reference salesforce:cross-tenant-only') }),
     ]))
-    expect(await staging.list('ReferenceClient')).toHaveLength(2)
+    expect(result.opportunities?.records[0]).toMatchObject({
+      id: '00000000-0000-4000-8000-000000000404',
+      accountId: '00000000-0000-4000-8000-000000000401',
+      isClosed: true,
+      isWon: false,
+    })
+    expect(result.activities?.records[0]).toMatchObject({
+      id: '00000000-0000-4000-8000-000000000405',
+      accountId: '00000000-0000-4000-8000-000000000401',
+      contactId: '00000000-0000-4000-8000-000000000402',
+      type: 'meeting',
+    })
+    expect(await canonical.closedLostRows('ReferenceClient')).toMatchObject([{
+      id: '00000000-0000-4000-8000-000000000404',
+      fields: { account_name: 'Reference Co', opportunity_loss_reason: 'Timing' },
+    }])
+    expect(await canonical.closedLostRows('Acme')).toHaveLength(0)
+    expect(await staging.list('ReferenceClient')).toHaveLength(4)
 
     // Exact retry reuses staging batches and canonical external identities.
-    await coordinator.refresh('ReferenceClient', { accountBatch, contactBatch, accountMapping, contactMapping })
-    expect(await staging.list('ReferenceClient')).toHaveLength(2)
+    await coordinator.refresh('ReferenceClient', {
+      accountBatch,
+      contactBatch,
+      opportunityBatch,
+      activityBatch,
+      accountMapping,
+      contactMapping,
+      opportunityMapping,
+      activityMapping,
+    })
+    expect(await staging.list('ReferenceClient')).toHaveLength(4)
     expect(await canonical.listAll('ReferenceClient', 'contact')).toHaveLength(2)
+    expect(await canonical.listAll('ReferenceClient', 'opportunity')).toHaveLength(1)
+    expect(await canonical.listAll('ReferenceClient', 'activity')).toHaveLength(1)
+
+    await expect(coordinator.refresh('ReferenceClient', {
+      accountBatch,
+      contactBatch,
+      opportunityBatch,
+      accountMapping,
+      contactMapping,
+    })).rejects.toThrow('opportunity batch and mapping must be provided together')
+    expect(await staging.list('ReferenceClient')).toHaveLength(4)
   })
 })
 

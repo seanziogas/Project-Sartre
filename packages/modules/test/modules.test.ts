@@ -120,12 +120,15 @@ describe('closed-lost reactivation pipeline', () => {
     })(),
   }
 
-  function deps(enrolled: { id: string }[][]) {
+  function deps(enrolled: { id: string }[][], loadedClients: string[] = []) {
     return {
-      pullClosedLost: async () => [
-        { id: 'won1', fields: { name: 'FleetCo', description: 'trucks' } },
-        { id: 'low1', fields: { name: 'CompetitorCo', description: 'rival' } },
-      ],
+      loadCanonicalClosedLost: async (clientId: string) => {
+        loadedClients.push(clientId)
+        return [
+          { id: 'won1', fields: { name: 'FleetCo', description: 'trucks' } },
+          { id: 'low1', fields: { name: 'CompetitorCo', description: 'rival' } },
+        ]
+      },
       graderConfig: {
         brainContext: 'Posture: generous',
         vocabularies: { industry: ['Fleet', 'Other'] },
@@ -152,7 +155,8 @@ describe('closed-lost reactivation pipeline', () => {
 
   it('grades, selects, parks at the outbound gate with a review deck, enrolls on approval', async () => {
     const enrolled: { id: string }[][] = []
-    const pipeline = buildReactivationPipeline(deps(enrolled))
+    const loadedClients: string[] = []
+    const pipeline = buildReactivationPipeline(deps(enrolled, loadedClients))
     const store = new MemoryRunStore()
     const engine = new PipelineEngine(store, { now: NOW, runId: 'r1' })
     const m = manifest('sales.reactivation')
@@ -164,6 +168,7 @@ describe('closed-lost reactivation pipeline', () => {
     expect(payload.totalRows).toBe(1) // low-scorer filtered out
     expect(payload.reviewSample.length).toBeGreaterThan(0)
     expect(enrolled).toHaveLength(0) // NOTHING sent pre-approval
+    expect(loadedClients).toEqual(['Acme'])
 
     const done = await engine.resolveGate(pipeline, 'r1', 'draft:outbound_send', 'approved', 'gtme@kiln', m)
     expect(done.status).toBe('completed')

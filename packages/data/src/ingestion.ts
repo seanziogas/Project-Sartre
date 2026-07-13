@@ -1,4 +1,4 @@
-import type { Account, Contact } from '@sartre/core'
+import type { Account, Activity, Contact, Opportunity } from '@sartre/core'
 import type { StagedBatch } from '@sartre/connectors'
 import type { AuditAccountRow, AuditContactRow } from './audit.js'
 import { mapSourceRow, parseSourceMapping } from './mapping.js'
@@ -20,6 +20,16 @@ export interface CanonicalIngestionPort {
     candidates: CanonicalCandidate[],
     options?: PromotionOptions,
   ): Promise<PromotionResult<Contact>>
+  promoteOpportunities(
+    clientId: string,
+    candidates: CanonicalCandidate[],
+    options?: PromotionOptions,
+  ): Promise<PromotionResult<Opportunity>>
+  promoteActivities(
+    clientId: string,
+    candidates: CanonicalCandidate[],
+    options?: PromotionOptions,
+  ): Promise<PromotionResult<Activity>>
   findByExternalId(
     clientId: string,
     recordType: 'account' | 'contact',
@@ -34,12 +44,18 @@ export interface CanonicalRefreshInput {
   contactBatch: StagedBatch
   accountMapping: SourceMapping | unknown
   contactMapping: SourceMapping | unknown
+  opportunityBatch?: StagedBatch
+  opportunityMapping?: SourceMapping | unknown
+  activityBatch?: StagedBatch
+  activityMapping?: SourceMapping | unknown
   runId?: string
 }
 
 export interface CanonicalRefreshResult {
   accounts: PromotionResult<Account>
   contacts: PromotionResult<Contact>
+  opportunities?: PromotionResult<Opportunity>
+  activities?: PromotionResult<Activity>
   audit: { accounts: AuditAccountRow[]; contacts: AuditContactRow[] }
 }
 
@@ -58,42 +74,58 @@ export class CanonicalIngestionCoordinator {
     input: CanonicalRefreshInput,
     options: PromotionOptions = {},
   ): Promise<CanonicalRefreshResult> {
-    await Promise.all([
-      this.staging.append(clientId, input.accountBatch),
-      this.staging.append(clientId, input.contactBatch),
-    ])
+    assertOptionalPair(input.opportunityBatch, input.opportunityMapping, 'opportunity')
+    assertOptionalPair(input.activityBatch, input.activityMapping, 'activity')
+    const batches = [input.accountBatch, input.contactBatch]
+    if (input.opportunityBatch) batches.push(input.opportunityBatch)
+    if (input.activityBatch) batches.push(input.activityBatch)
+    await Promise.all(batches.map((batch) => this.staging.append(clientId, batch)))
 
     const accountMapping = parseSourceMapping(input.accountMapping)
     const contactMapping = parseSourceMapping(input.contactMapping)
+    const opportunityMapping = input.opportunityMapping === undefined
+      ? undefined
+      : parseSourceMapping(input.opportunityMapping)
+    const activityMapping = input.activityMapping === undefined
+      ? undefined
+      : parseSourceMapping(input.activityMapping)
     assertObject(input.accountBatch, accountMapping, 'account')
     assertObject(input.contactBatch, contactMapping, 'contact')
+    if (input.opportunityBatch && opportunityMapping) {
+      assertObject(input.opportunityBatch, opportunityMapping, 'opportunity')
+    }
+    if (input.activityBatch && activityMapping) {
+      assertObject(input.activityBatch, activityMapping, 'activity')
+    }
 
-    const accountCandidates = input.accountBatch.rows.map((row) => mapSourceRow(
-      row,
-      accountMapping,
-      {
-        clientId,
-        connectorId: input.accountBatch.connectorId,
-        extractedAt: input.accountBatch.extractedAt,
-        ...(input.runId ? { runId: input.runId } : {}),
-      },
-    ))
+    const accountCandidates = mapBatch(clientId, input.accountBatch, accountMapping, input.runId)
     const accounts = await this.canonical.promoteAccounts(clientId, accountCandidates, options)
 
-    const contactCandidates = input.contactBatch.rows.map((row) => mapSourceRow(
-      row,
-      contactMapping,
-      {
-        clientId,
-        connectorId: input.contactBatch.connectorId,
-        extractedAt: input.contactBatch.extractedAt,
-        ...(input.runId ? { runId: input.runId } : {}),
-      },
-    ))
+    const contactCandidates = mapBatch(clientId, input.contactBatch, contactMapping, input.runId)
     const resolvedContacts = await resolveCandidateReferences(clientId, contactCandidates, this.canonical)
     const contacts = await this.canonical.promoteContacts(clientId, resolvedContacts, options)
+
+    let opportunities: PromotionResult<Opportunity> | undefined
+    if (input.opportunityBatch && opportunityMapping) {
+      const candidates = mapBatch(clientId, input.opportunityBatch, opportunityMapping, input.runId)
+      opportunities = await this.canonical.promoteOpportunities(
+        clientId,
+        await resolveCandidateReferences(clientId, candidates, this.canonical),
+        options,
+      )
+    }
+
+    let activities: PromotionResult<Activity> | undefined
+    if (input.activityBatch && activityMapping) {
+      const candidates = mapBatch(clientId, input.activityBatch, activityMapping, input.runId)
+      activities = await this.canonical.promoteActivities(
+        clientId,
+        await resolveCandidateReferences(clientId, candidates, this.canonical),
+        options,
+      )
+    }
     const audit = await this.canonical.auditRows(clientId)
-    return { accounts, contacts, audit }
+    return { accounts, contacts, ...(opportunities ? { opportunities } : {}), ...(activities ? { activities } : {}), audit }
   }
 }
 
@@ -131,7 +163,31 @@ export async function resolveCandidateReferences(
   return resolved
 }
 
-function assertObject(batch: StagedBatch, mapping: SourceMapping, expected: 'account' | 'contact'): void {
+function mapBatch(
+  clientId: string,
+  batch: StagedBatch,
+  mapping: SourceMapping,
+  runId?: string,
+): CanonicalCandidate[] {
+  return batch.rows.map((row) => mapSourceRow(row, mapping, {
+    clientId,
+    connectorId: batch.connectorId,
+    extractedAt: batch.extractedAt,
+    ...(runId ? { runId } : {}),
+  }))
+}
+
+function assertObject(batch: StagedBatch, mapping: SourceMapping, expected: SourceMapping['object']): void {
   if (batch.object !== expected) throw new Error(`expected ${expected} batch, received ${batch.object}`)
   if (mapping.object !== expected) throw new Error(`expected ${expected} mapping, received ${mapping.object}`)
+}
+
+function assertOptionalPair(
+  batch: StagedBatch | undefined,
+  mapping: SourceMapping | unknown | undefined,
+  object: 'opportunity' | 'activity',
+): void {
+  if ((batch === undefined) !== (mapping === undefined)) {
+    throw new Error(`${object} batch and mapping must be provided together`)
+  }
 }

@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { Account } from '@sartre/core'
 import {
   canonicalAuditRows,
+  canonicalClosedLostRows,
   mapSourceRow,
   promoteAccountCandidates,
   promoteContactCandidates,
+  promoteOpportunityCandidates,
 } from '../src/index.js'
 
 const NOW = () => new Date('2026-07-13T14:00:00Z')
@@ -135,5 +137,48 @@ describe('canonical candidate promotion', () => {
     expect(audit.accounts[0]).toMatchObject({ ownerRef: 'rep-1', domain: 'acme.com' })
     expect(audit.accounts[0]?.updatedAt).toBe('2026-07-01T17:00:00.000Z')
     expect(audit.contacts[0]).toMatchObject({ email: 'jane@acme.com', accountRef: account.id, companyName: 'Acme', updatedAt: '2026-07-02T00:00:00.000Z' })
+  })
+
+  it('builds closed-lost grading rows from canonical relationships and excludes protected accounts', () => {
+    const account = promoteAccountCandidates(
+      'Acme',
+      [accountCandidate('Acme', '001', 'Acme', 'acme.com')],
+      [],
+      { now: NOW, createId: () => '00000000-0000-4000-8000-000000000206' },
+    ).records[0]!
+    const candidate = mapSourceRow(
+      {
+        Id: '006', AccountId: '001', Name: 'Expansion', Stage: 'Closed Lost', Amount: 50000,
+        CloseDate: '2026-06-01T00:00:00Z', IsClosed: true, IsWon: false, LossReason: 'Timing',
+      },
+      {
+        object: 'opportunity',
+        externalIdField: 'Id',
+        fields: [
+          { source: 'Name', target: 'name', transform: 'trim' },
+          { source: 'Stage', target: 'stage', transform: 'trim' },
+          { source: 'Amount', target: 'amountUsd', transform: 'number' },
+          { source: 'CloseDate', target: 'closeDate', transform: 'datetime' },
+          { source: 'IsClosed', target: 'isClosed', transform: 'boolean' },
+          { source: 'IsWon', target: 'isWon', transform: 'boolean' },
+          { source: 'LossReason', target: 'lossReason', transform: 'trim' },
+        ],
+        references: [{ source: 'AccountId', target: 'accountId', recordType: 'account' }],
+      },
+      { clientId: 'Acme', connectorId: 'salesforce', extractedAt: '2026-07-13T12:00:00Z' },
+    )
+    candidate.fields.accountId = { value: account.id, provenance: candidate.references[0]!.provenance }
+    const opportunity = promoteOpportunityCandidates(
+      'Acme',
+      [candidate],
+      [],
+      { now: NOW, createId: () => '00000000-0000-4000-8000-000000000207' },
+    ).records[0]!
+
+    expect(canonicalClosedLostRows([account], [opportunity])).toMatchObject([{
+      id: opportunity.id,
+      fields: { account_name: 'Acme', opportunity_amount_usd: '50000' },
+    }])
+    expect(canonicalClosedLostRows([{ ...account, flags: ['excluded'] }], [opportunity])).toEqual([])
   })
 })

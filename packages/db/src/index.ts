@@ -11,10 +11,18 @@ import type {
 } from '@sartre/core'
 import { StagedBatchSchema } from '@sartre/connectors'
 import type { CacheEntry, CacheStore, StagedBatch } from '@sartre/connectors'
-import { canonicalAuditRows, promoteAccountCandidates, promoteContactCandidates } from '@sartre/data'
+import {
+  canonicalAuditRows,
+  canonicalClosedLostRows,
+  promoteAccountCandidates,
+  promoteActivityCandidates,
+  promoteContactCandidates,
+  promoteOpportunityCandidates,
+} from '@sartre/data'
 import type {
   AuditAccountRow,
   AuditContactRow,
+  CanonicalClosedLostRow,
   CanonicalCandidate,
   PromotionOptions,
   PromotionResult,
@@ -298,6 +306,36 @@ export class PostgresCanonicalStore {
     const result = promoteContactCandidates(clientId, candidates, existing, accounts, options)
     for (const record of result.changedRecords) await this.put(clientId, 'contact', record)
     return result
+  }
+
+  async promoteOpportunities(
+    clientId: string,
+    candidates: CanonicalCandidate[],
+    options: PromotionOptions = {},
+  ): Promise<PromotionResult<OpportunityType>> {
+    const existing = await this.listAll(clientId, 'opportunity') as OpportunityType[]
+    const result = promoteOpportunityCandidates(clientId, candidates, existing, options)
+    for (const record of result.changedRecords) await this.put(clientId, 'opportunity', record)
+    return result
+  }
+
+  async promoteActivities(
+    clientId: string,
+    candidates: CanonicalCandidate[],
+    options: PromotionOptions = {},
+  ): Promise<PromotionResult<ActivityType>> {
+    const existing = await this.listAll(clientId, 'activity') as ActivityType[]
+    const result = promoteActivityCandidates(clientId, candidates, existing, options)
+    for (const record of result.changedRecords) await this.put(clientId, 'activity', record)
+    return result
+  }
+
+  async closedLostRows(clientId: string): Promise<CanonicalClosedLostRow[]> {
+    const [accounts, opportunities] = await Promise.all([
+      this.listAll(clientId, 'account') as Promise<AccountType[]>,
+      this.listAll(clientId, 'opportunity') as Promise<OpportunityType[]>,
+    ])
+    return canonicalClosedLostRows(accounts, opportunities)
   }
 
   async auditRows(clientId: string): Promise<{ accounts: AuditAccountRow[]; contacts: AuditContactRow[] }> {

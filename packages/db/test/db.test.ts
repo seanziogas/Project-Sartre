@@ -15,6 +15,7 @@ import {
   PostgresFeedbackLog,
   PostgresRunStore,
   PostgresStagingStore,
+  PostgresToolConnectionStore,
 } from '../src/index.js'
 import type { Queryable } from '../src/index.js'
 
@@ -135,6 +136,36 @@ describe('PostgresCacheStore (against PGlite)', () => {
       icp_grade: { value: 'A', provenance: { source: 'inference', origin: 'grader', retrievedAt: '2026-07-01T00:00:00Z', confidence: 'high' } },
     })
     expect(rejected.rejected).toEqual(['icp_grade'])
+  })
+})
+
+describe('PostgresToolConnectionStore (against PGlite)', () => {
+  it('keeps encrypted credentials tenant-scoped and out of list responses', async () => {
+    const store = new PostgresToolConnectionStore(db)
+    await store.put({
+      connectionId: '9a6c8cbe-ef44-4ceb-955a-9b136de1877e',
+      clientId: 'Acme',
+      provider: 'salesforce',
+      authKind: 'oauth',
+      label: 'Production Salesforce',
+      status: 'active',
+      encryptedCredentials: 'v1.test-only-envelope',
+      metadata: { instanceUrl: 'https://acme.example' },
+      createdAt: '2026-07-13T12:00:00Z',
+      updatedAt: '2026-07-13T12:00:00Z',
+    })
+
+    const listed = await store.list('Acme')
+    expect(listed).toHaveLength(1)
+    expect(listed[0]).not.toHaveProperty('encryptedCredentials')
+    expect(await store.list('OtherClient')).toHaveLength(0)
+    expect(await store.get('OtherClient', listed[0]!.connectionId)).toBeNull()
+    expect((await store.get('Acme', listed[0]!.connectionId))?.encryptedCredentials).toBe('v1.test-only-envelope')
+
+    expect(await store.revoke('Acme', listed[0]!.connectionId, '2026-07-13T13:00:00Z')).toBe(true)
+    expect(await store.list('Acme')).toHaveLength(0)
+    const revoked = await store.get('Acme', listed[0]!.connectionId)
+    expect(revoked).toMatchObject({ status: 'revoked', encryptedCredentials: '' })
   })
 })
 

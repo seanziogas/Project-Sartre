@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { FileClientBrainStore } from '@sartre/core'
 import type { Queryable } from '@sartre/db'
+import type { TenantConnectionResolver } from './connections.js'
 import type { RunnerModuleDeps } from './registry.js'
 
 export interface RunnerDeploymentContext {
@@ -9,6 +10,8 @@ export interface RunnerDeploymentContext {
   db: Queryable
   /** Approved, path-isolated brain documents and typed config per client. */
   brains: FileClientBrainStore
+  /** Explicit, tenant-scoped credential access for deployment-owned adapters. */
+  connections: TenantConnectionResolver
 }
 
 export interface RunnerDeploymentModule {
@@ -23,7 +26,7 @@ export async function loadModuleDeps(
   context: RunnerDeploymentContext,
 ): Promise<RunnerModuleDeps> {
   if (!modulePath || modulePath.trim() === '') {
-    throw new Error('SARTRE_MODULE_DEPS is required for the runner')
+    return unconfiguredModuleDeps()
   }
   const url = pathToFileURL(resolve(modulePath)).href
   const loaded = await import(url) as Partial<RunnerDeploymentModule>
@@ -33,6 +36,24 @@ export async function loadModuleDeps(
   const deps = await loaded.createModuleDeps(context)
   assertModuleDeps(deps)
   return deps
+}
+
+function unconfiguredModuleDeps(): RunnerModuleDeps {
+  const missing = (section: string) => async (clientId: string): Promise<never> => {
+    throw new Error(`${section} dependencies are not configured for client ${clientId}; connect the required tools and configure SARTRE_MODULE_DEPS`)
+  }
+  return {
+    enrichment: missing('enrichment'),
+    reactivation: missing('reactivation'),
+    inbound: missing('inbound'),
+    remediation: missing('remediation'),
+    copilotBriefs: missing('copilot briefs'),
+    dedup: missing('dedup'),
+    leadConvert: missing('lead conversion'),
+    deanon: missing('de-anonymization'),
+    learning: missing('learning'),
+    quality: missing('quality'),
+  }
 }
 
 function assertModuleDeps(value: unknown): asserts value is RunnerModuleDeps {

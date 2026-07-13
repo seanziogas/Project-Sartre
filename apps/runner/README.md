@@ -6,11 +6,15 @@ Required environment:
 
 - `DATABASE_URL` — shared Postgres connection string.
 - `ANTHROPIC_API_KEY` — used only through `AnthropicLlmClient` with `claude-opus-4-8`.
-- `SARTRE_MODULE_DEPS` — path to a deployment-owned ESM module exporting `createModuleDeps(context)`.
 - `SARTRE_CLIENTS_DIR` — optional client-instance path; defaults to `clients/`.
 - `SARTRE_TICK_MS` — optional polling interval; defaults to 30 seconds.
 
-The deployment module keeps credential-bearing connector construction outside the platform registry. It receives `{ db, brains }`; `brains` loads active, human-approved documents and typed config from the requested client instance. The runner owns and injects the locked production model adapter separately.
+Connection environment:
+
+- `SARTRE_MODULE_DEPS` — optional path to a deployment-owned ESM module exporting `createModuleDeps(context)`. The service and portal start without it; a module reports an explicit configuration error only when execution needs unresolved dependencies.
+- `SARTRE_CREDENTIAL_ENCRYPTION_KEY` — 32 random bytes encoded as base64. It is required to create or use a client connection, not to access Sartre or run connector-free surfaces.
+
+The deployment module keeps credential-bearing connector construction outside the platform registry. It receives `{ db, brains, connections }`; `brains` loads active, human-approved documents and typed config from the requested client instance. `connections` can list or resolve only the requested client's active connections. Credentials are decrypted only by an explicit execution-time `resolve`/`resolveProvider` call and are not cached. The runner owns and injects the locked production model adapter separately.
 
 Every dependency section is a required resolver `(clientId) => deps`, so connector credentials, grading context, routing rules, templates, and destinations cannot bleed between clients:
 
@@ -49,4 +53,4 @@ The learning resolver reads tenant-scoped feedback from `PostgresFeedbackLog`. I
 
 The quality resolver loads the latest two health reports, refreshes machine-owned MVD state, and delivers contract/drift alerts only after the `client_comms` gate. Schedule it after the canonical enrichment refresh so it evaluates the newest report.
 
-Startup fails when the module is absent or incomplete. The runner never falls back to an empty registry, scripted connector, or alternate model, and deployment code cannot replace the reactivation pipeline's LLM client.
+An incomplete configured deployment module still fails startup. With no module configured, the runner retains the complete production registry and defers a clear dependency error until a configured pipeline actually needs an adapter. It never substitutes a scripted connector or alternate model, and deployment code cannot replace the reactivation pipeline's LLM client.

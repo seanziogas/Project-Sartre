@@ -26,4 +26,12 @@ describe('portal authorization', () => {
     expect(canDecideOutputClass(config.identities[1]!, 'Acme', 'brain_change')).toBe(true)
     expect(canDecideOutputClass(approver, 'Other', 'outbound_send')).toBe(false)
   })
+
+  it('allows client connection management without granting it to read-only viewers', () => {
+    expect(canAccessClient(config.identities[0]!, 'AnyClient', 'connect')).toBe(true)
+    expect(canAccessClient(config.identities[1]!, 'Acme', 'connect')).toBe(true)
+    expect(canAccessClient(config.identities[2]!, 'Acme', 'connect')).toBe(true)
+    expect(canAccessClient(config.identities[3]!, 'Acme', 'connect')).toBe(false)
+    expect(canAccessClient(config.identities[2]!, 'Other', 'connect')).toBe(false)
+  })
 })

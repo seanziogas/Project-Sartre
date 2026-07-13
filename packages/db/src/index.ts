@@ -10,7 +10,7 @@ import type {
   Signal as SignalType,
 } from '@sartre/core'
 import { StagedBatchSchema } from '@sartre/connectors'
-import type { CacheEntry, CacheStore, StagedBatch } from '@sartre/connectors'
+import type { CacheEntry, CacheStore, ConnectionAuthKind, StagedBatch, ToolConnectionSummary } from '@sartre/connectors'
 import {
   canonicalAuditRows,
   canonicalBriefContexts,
@@ -102,6 +102,22 @@ export async function migrate(db: Queryable): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS feedback_client_idx ON feedback_events (client_id, occurred_at DESC);
 
+    CREATE TABLE IF NOT EXISTS tool_connections (
+      client_id             text NOT NULL,
+      connection_id         uuid NOT NULL,
+      provider              text NOT NULL,
+      auth_kind             text NOT NULL CHECK (auth_kind IN ('api_key', 'oauth', 'service_account')),
+      label                 text NOT NULL,
+      status                text NOT NULL CHECK (status IN ('active', 'revoked')),
+      encrypted_credentials text NOT NULL,
+      metadata              jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_at            timestamptz NOT NULL,
+      updated_at            timestamptz NOT NULL,
+      PRIMARY KEY (client_id, connection_id)
+    );
+    CREATE INDEX IF NOT EXISTS tool_connections_client_idx
+      ON tool_connections (client_id, status, provider, updated_at DESC);
+
     CREATE TABLE IF NOT EXISTS staged_batches (
       batch_id      text PRIMARY KEY,
       client_id     text NOT NULL,
@@ -139,6 +155,65 @@ export interface StoredStagedBatch {
   batchId: string
   clientId: string
   batch: StagedBatch
+}
+
+export interface StoredToolConnection extends ToolConnectionSummary {
+  encryptedCredentials: string
+}
+
+/** Tenant-scoped opaque credential storage. Encryption/decryption stays outside the DB adapter. */
+export class PostgresToolConnectionStore {
+  constructor(private readonly db: Queryable) {}
+
+  async put(input: StoredToolConnection): Promise<ToolConnectionSummary> {
+    assertClientId(input.clientId)
+    if (!input.connectionId || !input.provider.trim() || !input.label.trim() || !input.encryptedCredentials) {
+      throw new Error('connection id, provider, label, and encrypted credentials are required')
+    }
+    await this.db.query(
+      `INSERT INTO tool_connections
+         (client_id, connection_id, provider, auth_kind, label, status, encrypted_credentials, metadata, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (client_id, connection_id) DO UPDATE SET
+         provider = EXCLUDED.provider, auth_kind = EXCLUDED.auth_kind, label = EXCLUDED.label,
+         status = EXCLUDED.status, encrypted_credentials = EXCLUDED.encrypted_credentials,
+         metadata = EXCLUDED.metadata, updated_at = EXCLUDED.updated_at`,
+      [input.clientId, input.connectionId, input.provider, input.authKind, input.label, input.status,
+        input.encryptedCredentials, JSON.stringify(input.metadata), input.createdAt, input.updatedAt],
+    )
+    return connectionSummary(input)
+  }
+
+  async get(clientId: string, connectionId: string): Promise<StoredToolConnection | null> {
+    assertClientId(clientId)
+    const { rows } = await this.db.query(
+      `SELECT client_id, connection_id, provider, auth_kind, label, status, encrypted_credentials, metadata, created_at, updated_at
+       FROM tool_connections WHERE client_id = $1 AND connection_id = $2`,
+      [clientId, connectionId],
+    )
+    return rows.length === 0 ? null : storedConnection(rows[0])
+  }
+
+  async list(clientId: string, includeRevoked = false): Promise<ToolConnectionSummary[]> {
+    assertClientId(clientId)
+    const { rows } = await this.db.query(
+      `SELECT client_id, connection_id, provider, auth_kind, label, status, metadata, created_at, updated_at
+       FROM tool_connections WHERE client_id = $1 AND ($2::boolean OR status = 'active')
+       ORDER BY provider, updated_at DESC`,
+      [clientId, includeRevoked],
+    )
+    return rows.map(connectionSummaryRow)
+  }
+
+  async revoke(clientId: string, connectionId: string, revokedAt: string): Promise<boolean> {
+    assertClientId(clientId)
+    const { rows } = await this.db.query(
+      `UPDATE tool_connections SET status = 'revoked', encrypted_credentials = '', updated_at = $3
+       WHERE client_id = $1 AND connection_id = $2 AND status = 'active' RETURNING connection_id`,
+      [clientId, connectionId, revokedAt],
+    )
+    return rows.length > 0
+  }
 }
 
 /** Append-only raw connector staging. Exact retries are content-idempotent. */
@@ -389,6 +464,50 @@ function stagedRow(row: unknown): StoredStagedBatch {
     clientId: value.client_id,
     batch: StagedBatchSchema.parse(value.batch) as StagedBatch,
   }
+}
+
+function storedConnection(row: unknown): StoredToolConnection {
+  const value = row as {
+    encrypted_credentials: string
+  }
+  return {
+    ...connectionSummaryRow(row),
+    encryptedCredentials: value.encrypted_credentials,
+  }
+}
+
+function connectionSummaryRow(row: unknown): ToolConnectionSummary {
+  const value = row as {
+    client_id: string
+    connection_id: string
+    provider: string
+    auth_kind: ConnectionAuthKind
+    label: string
+    status: 'active' | 'revoked'
+    metadata: Record<string, string> | null
+    created_at: string | Date
+    updated_at: string | Date
+  }
+  return {
+    connectionId: value.connection_id,
+    clientId: value.client_id,
+    provider: value.provider,
+    authKind: value.auth_kind,
+    label: value.label,
+    status: value.status,
+    metadata: value.metadata ?? {},
+    createdAt: asIsoTimestamp(value.created_at),
+    updatedAt: asIsoTimestamp(value.updated_at),
+  }
+}
+
+function connectionSummary(connection: StoredToolConnection): ToolConnectionSummary {
+  const { encryptedCredentials: _encryptedCredentials, ...summary } = connection
+  return summary
+}
+
+function asIsoTimestamp(value: string | Date): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
 }
 
 function parseCanonical(recordType: CanonicalRecordType, value: unknown): CanonicalRecord {

@@ -9,6 +9,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@sartre/connectors": "*",
     "@sartre/core": "*",
     "@sartre/data": "*",
     "@sartre/db": "*",

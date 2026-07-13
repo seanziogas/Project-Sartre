@@ -7,6 +7,7 @@ export function ClientTabs({ clientId, active, showCopilot = false }: { clientId
     { key: 'review', label: 'Review Queue', href: `${base}/review` },
     { key: 'runs', label: 'Runs', href: `${base}/runs` },
     { key: 'health', label: 'Data Health', href: `${base}/health` },
+    { key: 'connections', label: 'Connections', href: `${base}/connections` },
     ...(showCopilot ? [{ key: 'copilot', label: 'Copilot', href: `${base}/copilot` }] : []),
   ]
   return (

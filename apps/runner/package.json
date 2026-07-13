@@ -8,13 +8,11 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
+    "@sartre/connectors": "*",
     "@sartre/core": "*",
     "@sartre/db": "*",
     "@sartre/modules": "*",
     "@sartre/pipelines": "*",
     "@sartre/skills": "*"
-  },
-  "devDependencies": {
-    "@sartre/connectors": "*"
   }
 }

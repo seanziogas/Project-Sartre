@@ -1,10 +1,13 @@
 import 'server-only'
+import { randomUUID } from 'node:crypto'
 import { readFile, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { parseManifest } from '@sartre/core'
 import type { ClientManifest, FeedbackEvent } from '@sartre/core'
 import type { RunRecord } from '@sartre/pipelines'
 import type { DataHealthReport } from '@sartre/data'
+import { CredentialVault, ToolConnectionInput } from '@sartre/connectors'
+import type { ToolConnectionSummary } from '@sartre/connectors'
 import { getOpsDatabase } from './postgres'
 import type { PendingGate } from './run-data'
 
@@ -72,6 +75,40 @@ export async function listPendingGates(clientId: string): Promise<PendingGate[]>
 
 export async function listFeedback(clientId: string, limit = 500): Promise<FeedbackEvent[]> {
   return (await getOpsDatabase()).data.listFeedback(clientId, limit)
+}
+
+export async function listToolConnections(clientId: string): Promise<ToolConnectionSummary[]> {
+  return (await getOpsDatabase()).connections.list(clientId)
+}
+
+export async function connectTool(
+  clientId: string,
+  input: unknown,
+  actor: string,
+): Promise<ToolConnectionSummary> {
+  const parsed = ToolConnectionInput.parse(input)
+  const key = process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY
+  if (!key) throw new Error('SARTRE_CREDENTIAL_ENCRYPTION_KEY is required to save connections')
+  const now = new Date().toISOString()
+  return (await getOpsDatabase()).connections.put({
+    connectionId: randomUUID(),
+    clientId,
+    provider: parsed.provider,
+    authKind: parsed.authKind,
+    label: parsed.label,
+    status: 'active',
+    encryptedCredentials: new CredentialVault(key).seal(parsed.credentials, clientId),
+    metadata: { ...parsed.metadata, connectedBy: actor },
+    createdAt: now,
+    updatedAt: now,
+  })
+}
+
+export async function revokeToolConnection(
+  clientId: string,
+  connectionId: string,
+): Promise<boolean> {
+  return (await getOpsDatabase()).connections.revoke(clientId, connectionId, new Date().toISOString())
 }
 
 /**

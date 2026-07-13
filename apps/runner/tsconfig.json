@@ -6,8 +6,11 @@
   },
   "include": ["src"],
   "references": [
+    { "path": "../../packages/connectors" },
     { "path": "../../packages/core" },
     { "path": "../../packages/db" },
-    { "path": "../../packages/pipelines" }
+    { "path": "../../packages/modules" },
+    { "path": "../../packages/pipelines" },
+    { "path": "../../packages/skills" }
   ]
 }

@@ -10,6 +10,11 @@
   "dependencies": {
     "@sartre/core": "*",
     "@sartre/db": "*",
-    "@sartre/pipelines": "*"
+    "@sartre/modules": "*",
+    "@sartre/pipelines": "*",
+    "@sartre/skills": "*"
+  },
+  "devDependencies": {
+    "@sartre/connectors": "*"
   }
 }

@@ -6,6 +6,7 @@ import { AnthropicLlmClient } from '@sartre/skills'
 import { loadModuleDeps } from './deployment.js'
 import { buildRegistry } from './registry.js'
 import { TenantConnectionResolver } from './connections.js'
+import { TenantToolClients } from './tools.js'
 
 /**
  * Runner service entrypoint. Config via env:
@@ -26,12 +27,13 @@ const connections = new TenantConnectionResolver(
   new PostgresToolConnectionStore(connection),
   process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY,
 )
+const tools = new TenantToolClients(connection, connections)
 const moduleDeps = await initializeModuleDeps()
 
 async function initializeModuleDeps() {
   try {
     await migrate(connection)
-    return await loadModuleDeps(process.env.SARTRE_MODULE_DEPS, { db: connection, brains, connections })
+    return await loadModuleDeps(process.env.SARTRE_MODULE_DEPS, { db: connection, brains, connections, tools })
   } catch (error) {
     await connection.close()
     throw error

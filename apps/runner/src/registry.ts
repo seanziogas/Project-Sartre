@@ -9,6 +9,19 @@ import {
   buildDeanonPipeline,
   buildLearningLoopPipeline,
   buildQualityMonitorPipeline,
+  buildOutboundPipeline,
+  buildAbmPipeline,
+  buildTakeoutPipeline,
+  buildRepWorkflowsPipeline,
+  buildEventsPipeline,
+  buildCopyFactoryPipeline,
+  buildAdsSyncPipeline,
+  buildRoutingPipeline,
+  buildTamPipeline,
+  buildEtlPipeline,
+  buildSignalsPipeline,
+  buildDigestsPipeline,
+  buildMetricsPipeline,
 } from '@sartre/modules'
 import type {
   CopilotBriefDeps,
@@ -21,6 +34,19 @@ import type {
   InboundRoutingDeps,
   ReactivationDeps,
   RemediationDeps,
+  OutboundDeps,
+  AbmDeps,
+  TakeoutDeps,
+  RepWorkflowsDeps,
+  EventsDeps,
+  CopyFactoryDeps,
+  AdsSyncDeps,
+  RoutingDeps,
+  TamDeps,
+  EtlDeps,
+  SignalsDeps,
+  DigestsDeps,
+  MetricsDeps,
 } from '@sartre/modules'
 import { MapRegistry } from '@sartre/pipelines'
 import type { LlmClient } from '@sartre/skills'
@@ -42,6 +68,19 @@ export interface RunnerModuleDeps {
   deanon(clientId: string): DeanonDeps | Promise<DeanonDeps>
   learning(clientId: string): LearningLoopDeps | Promise<LearningLoopDeps>
   quality(clientId: string): QualityMonitorDeps | Promise<QualityMonitorDeps>
+  outbound(clientId: string): OutboundDeps | Promise<OutboundDeps>
+  abm(clientId: string): AbmDeps | Promise<AbmDeps>
+  takeout(clientId: string): TakeoutDeps | Promise<TakeoutDeps>
+  repWorkflows(clientId: string): RepWorkflowsDeps | Promise<RepWorkflowsDeps>
+  events(clientId: string): EventsDeps | Promise<EventsDeps>
+  copyFactory(clientId: string): CopyFactoryDeps | Promise<CopyFactoryDeps>
+  adsSync(clientId: string): AdsSyncDeps | Promise<AdsSyncDeps>
+  routing(clientId: string): RoutingDeps | Promise<RoutingDeps>
+  tam(clientId: string): TamDeps | Promise<TamDeps>
+  etl(clientId: string): EtlDeps | Promise<EtlDeps>
+  signals(clientId: string): SignalsDeps | Promise<SignalsDeps>
+  digests(clientId: string): DigestsDeps | Promise<DigestsDeps>
+  metrics(clientId: string): MetricsDeps | Promise<MetricsDeps>
 }
 
 /**
@@ -68,4 +107,17 @@ export function buildRegistry(deps: RunnerModuleDeps, llm: LlmClient): MapRegist
     .register(buildDeanonPipeline(deps.deanon))
     .register(buildLearningLoopPipeline(deps.learning))
     .register(buildQualityMonitorPipeline(deps.quality))
+    .register(buildOutboundPipeline(deps.outbound))
+    .register(buildAbmPipeline(deps.abm))
+    .register(buildTakeoutPipeline(deps.takeout))
+    .register(buildRepWorkflowsPipeline(deps.repWorkflows))
+    .register(buildEventsPipeline(deps.events))
+    .register(buildCopyFactoryPipeline(deps.copyFactory))
+    .register(buildAdsSyncPipeline(deps.adsSync))
+    .register(buildRoutingPipeline(deps.routing))
+    .register(buildTamPipeline(deps.tam))
+    .register(buildEtlPipeline(deps.etl))
+    .register(buildSignalsPipeline(deps.signals))
+    .register(buildDigestsPipeline(deps.digests))
+    .register(buildMetricsPipeline(deps.metrics))
 }

@@ -1,8 +1,10 @@
 import { revalidatePath } from 'next/cache'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { canAccessClient } from '@sartre/core'
+import { CredentialVault, oauthAuthorizationUrl } from '@sartre/connectors'
+import type { OAuthProviderId } from '@sartre/connectors'
 import { assertClientAccess, getPortalIdentity } from '@/lib/auth'
-import { connectTool, getManifest, listToolConnections, revokeToolConnection } from '@/lib/data'
+import { connectTool, getManifest, listToolConnectionEvents, listToolConnections, revokeToolConnection, rotateToolConnection, testToolConnection } from '@/lib/data'
 import { ClientTabs } from '@/lib/nav'
 
 export const dynamic = 'force-dynamic'
@@ -16,6 +18,7 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
   const manifest = await getManifest(clientId)
   if (!manifest) notFound()
   const connections = await listToolConnections(clientId)
+  const events = await listToolConnectionEvents(clientId)
   const mayConnect = canAccessClient(identity, clientId, 'connect')
 
   async function connect(formData: FormData) {
@@ -27,7 +30,7 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
       throw new Error('subscription status does not permit connection changes')
     }
     const credentials = Object.fromEntries(
-      ['apiKey', 'clientId', 'clientSecret', 'refreshToken', 'serviceAccountJson']
+      ['apiKey', 'accessToken', 'instanceUrl', 'enrichmentUrl', 'clientId', 'clientSecret', 'refreshToken', 'serviceAccountJson']
         .map((key) => [key, String(formData.get(key) ?? '').trim()] as const)
         .filter(([, value]) => value !== ''),
     )
@@ -57,8 +60,58 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
     if (!(await listToolConnections(clientId)).some((connection) => connection.connectionId === connectionId)) {
       throw new Error('connection not found for client')
     }
-    await revokeToolConnection(clientId, connectionId)
+    await revokeToolConnection(clientId, connectionId, currentIdentity.email)
     revalidatePath(`/clients/${encodeURIComponent(clientId)}/connections`)
+  }
+
+  async function rotate(formData: FormData) {
+    'use server'
+    const currentIdentity = await getPortalIdentity()
+    assertClientAccess(currentIdentity, clientId, 'connect')
+    const connectionId = String(formData.get('connectionId') ?? '')
+    const name = String(formData.get('credentialName') ?? '').trim()
+    const value = String(formData.get('credentialValue') ?? '').trim()
+    if (!/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(name) || !value) throw new Error('credential name and value are required')
+    await rotateToolConnection(clientId, connectionId, { [name]: value }, currentIdentity.email)
+    revalidatePath(`/clients/${encodeURIComponent(clientId)}/connections`)
+  }
+
+  async function testConnection(formData: FormData) {
+    'use server'
+    const currentIdentity = await getPortalIdentity()
+    assertClientAccess(currentIdentity, clientId, 'connect')
+    await testToolConnection(clientId, String(formData.get('connectionId') ?? ''), currentIdentity.email)
+    revalidatePath(`/clients/${encodeURIComponent(clientId)}/connections`)
+  }
+
+  async function startOAuth(formData: FormData) {
+    'use server'
+    const currentIdentity = await getPortalIdentity()
+    assertClientAccess(currentIdentity, clientId, 'connect')
+    const currentManifest = await getManifest(clientId)
+    if (!currentManifest || !['trialing', 'active'].includes(currentManifest.commercial.status)) {
+      throw new Error('subscription status does not permit connection changes')
+    }
+    const provider = String(formData.get('oauthProvider') ?? '') as OAuthProviderId
+    if (!['salesforce', 'hubspot', 'slack', 'teams'].includes(provider)) throw new Error('unsupported OAuth provider')
+    const key = process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY
+    const baseUrl = process.env.SARTRE_PUBLIC_BASE_URL
+    if (!key || !baseUrl) throw new Error('credential encryption key and public base URL are required for OAuth')
+    const publicUrl = new URL(baseUrl)
+    if (publicUrl.protocol !== 'https:' && publicUrl.hostname !== 'localhost' && publicUrl.hostname !== '127.0.0.1') {
+      throw new Error('SARTRE_PUBLIC_BASE_URL must use HTTPS outside local development')
+    }
+    const redirectUri = new URL('/api/connections/oauth/callback', publicUrl).toString()
+    const oauthClientId = String(formData.get('oauthClientId') ?? '').trim()
+    const oauthClientSecret = String(formData.get('oauthClientSecret') ?? '').trim()
+    const label = String(formData.get('oauthLabel') ?? '').trim()
+    const statePayload = new CredentialVault(key).seal({
+      clientId, provider, actor: currentIdentity.email, label,
+      oauthClientId, oauthClientSecret, redirectUri,
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    }, clientId)
+    const state = `${Buffer.from(clientId).toString('base64url')}.${statePayload}`
+    redirect(oauthAuthorizationUrl(provider, { clientId: oauthClientId, redirectUri, state }))
   }
 
   return (
@@ -83,10 +136,10 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
                 <td>{new Date(connection.createdAt).toLocaleString()}</td>
                 <td>
                   {mayConnect ? (
-                    <form action={revoke}>
-                      <input type="hidden" name="connectionId" value={connection.connectionId} />
-                      <button type="submit" className="reject">Revoke</button>
-                    </form>
+                    <div className="actions">
+                      <form action={testConnection}><input type="hidden" name="connectionId" value={connection.connectionId} /><button type="submit">Test</button></form>
+                      <form action={revoke}><input type="hidden" name="connectionId" value={connection.connectionId} /><button type="submit" className="reject">Revoke</button></form>
+                    </div>
                   ) : null}
                 </td>
               </tr>
@@ -94,6 +147,24 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
           </tbody>
         </table>
       )}
+
+      {mayConnect && connections.length > 0 ? (
+        <details className="card">
+          <summary>Rotate credentials</summary>
+          <form action={rotate} className="connection-form" style={{ marginTop: '0.75rem' }}>
+            <label>Connection<select name="connectionId">{connections.map((connection) => <option key={connection.connectionId} value={connection.connectionId}>{connection.label}</option>)}</select></label>
+            <label>Credential name<input type="text" name="credentialName" required placeholder="accessToken" /></label>
+            <label>New value<input type="password" name="credentialValue" required autoComplete="off" /></label>
+            <div className="full"><button type="submit">Rotate credential</button></div>
+          </form>
+        </details>
+      ) : null}
+
+      {events.length > 0 ? (
+        <><h2>Connection activity</h2><table><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Detail</th></tr></thead><tbody>
+          {events.map((event) => <tr key={event.eventId}><td>{new Date(event.occurredAt).toLocaleString()}</td><td>{event.kind}</td><td>{event.actor}</td><td>{event.detail}</td></tr>)}
+        </tbody></table></>
+      ) : null}
 
       {mayConnect ? (
         <>
@@ -110,6 +181,9 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
               </select>
             </label>
             <label>API key<input type="password" name="apiKey" autoComplete="off" /></label>
+            <label>Access token<input type="password" name="accessToken" autoComplete="off" /></label>
+            <label>CRM instance URL<input type="text" name="instanceUrl" autoComplete="off" /></label>
+            <label>Clay enrichment URL<input type="text" name="enrichmentUrl" autoComplete="off" /></label>
             <label>OAuth client ID<input type="password" name="clientId" autoComplete="off" /></label>
             <label>OAuth client secret<input type="password" name="clientSecret" autoComplete="off" /></label>
             <label>OAuth refresh token<input type="password" name="refreshToken" autoComplete="off" /></label>
@@ -125,6 +199,20 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
       ) : (
         <p className="muted">Your role can view connection status but cannot add or revoke credentials.</p>
       )}
+
+      {mayConnect ? (
+        <details className="card">
+          <summary>Connect with OAuth</summary>
+          <p className="muted">Use an OAuth app owned by this client. Its registered callback must match this deployment.</p>
+          <form action={startOAuth} className="connection-form">
+            <label>Provider<select name="oauthProvider"><option value="salesforce">salesforce</option><option value="hubspot">hubspot</option><option value="slack">slack</option><option value="teams">teams</option></select></label>
+            <label>Connection label<input type="text" name="oauthLabel" required /></label>
+            <label>OAuth client ID<input type="password" name="oauthClientId" required autoComplete="off" /></label>
+            <label>OAuth client secret<input type="password" name="oauthClientSecret" required autoComplete="off" /></label>
+            <div className="full"><button type="submit">Authorize with provider</button></div>
+          </form>
+        </details>
+      ) : null}
     </>
   )
 }

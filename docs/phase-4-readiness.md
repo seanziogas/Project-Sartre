@@ -8,5 +8,6 @@
 | Learning speed 3 | Evaluated Thompson-allocation and ICP-calibration drafts inside `platform.learning`, blocked by `brain_change` |
 | Commercial layer | Manifest subscription status, module entitlements, seats/renewal metadata, and commercial checks on start/resume/approval/copilot |
 | Client-owned tool connections | Portal access is connector-independent; authorized client operators can add/revoke tenant-scoped encrypted credentials, resolved only at module execution time |
+| Full locked taxonomy | All 23 stable module IDs have registered pipelines; every external effect remains behind its appropriate human gate |
 
 Deployment still requires an identity proxy, real access grants, `DATABASE_URL`, and—only for live copilot requests—`ANTHROPIC_API_KEY`. Tool connections additionally require a deployment-held `SARTRE_CREDENTIAL_ENCRYPTION_KEY`; the portal itself does not. CI uses scripted LLM fakes and contains no credentials or client data.

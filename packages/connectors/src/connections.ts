@@ -25,6 +25,18 @@ export interface ToolConnectionSummary {
   updatedAt: string
 }
 
+export type ToolConnectionEventKind = 'connected' | 'rotated' | 'tested' | 'revoked'
+
+export interface ToolConnectionEvent {
+  eventId: string
+  connectionId: string
+  clientId: string
+  kind: ToolConnectionEventKind
+  actor: string
+  detail: string
+  occurredAt: string
+}
+
 /** AES-256-GCM envelope. The encryption key is deployment state, never client/git state. */
 export class CredentialVault {
   private readonly key: Buffer

@@ -31,10 +31,84 @@ stack:
 
 # Canonical module IDs — see docs/taxonomy.md. Enable requires green MVD (or explicit override).
 modules:
+  sales.outbound:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  sales.abm:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  sales.reactivation:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  sales.takeout:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  sales.copilot-briefs:
+    enabled: false
+    always_on: true
+    schedule: "0 8 * * 1"
+    thresholds: {}
+  sales.rep-workflows:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  marketing.inbound:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  marketing.deanon:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  marketing.events:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  marketing.copy-factory:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  marketing.ads-sync:
+    enabled: false
+    always_on: false
+    thresholds: {}
   revops.enrichment:
     enabled: false
     always_on: true # hygiene runs on schedule once shipped
     schedule: "0 6 * * 1"
+    thresholds: {}
+  revops.dedup:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  revops.lead-convert:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  revops.routing:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  revops.tam:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  revops.etl:
+    enabled: false
+    always_on: false
+    thresholds: {}
+  revops.remediation:
+    enabled: false
+    always_on: true
+    thresholds: {}
+  platform.signals:
+    enabled: false
+    always_on: true
+    schedule: "0 * * * *"
     thresholds: {}
   platform.quality:
     enabled: true
@@ -44,6 +118,13 @@ modules:
   platform.metrics:
     enabled: true # baseline→delta reporting on from day one
     always_on: true
+    schedule: "0 9 * * 1"
+    thresholds: {}
+  platform.digests:
+    enabled: false
+    always_on: true
+    schedule: "0 10 * * 1"
+    thresholds: {}
   platform.learning:
     enabled: true # feedback-event capture is always on; tuning speeds opt in below
     always_on: true

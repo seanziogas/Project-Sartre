@@ -1,6 +1,6 @@
 # Runner configuration
 
-The runner polls the same Postgres database as the ops app and registers all ten production pipelines from `@sartre/modules`.
+The runner polls the same Postgres database as the ops app and registers all 23 locked production module pipelines from `@sartre/modules`.
 
 Required environment:
 
@@ -14,7 +14,7 @@ Connection environment:
 - `SARTRE_MODULE_DEPS` — optional path to a deployment-owned ESM module exporting `createModuleDeps(context)`. The service and portal start without it; a module reports an explicit configuration error only when execution needs unresolved dependencies.
 - `SARTRE_CREDENTIAL_ENCRYPTION_KEY` — 32 random bytes encoded as base64. It is required to create or use a client connection, not to access Sartre or run connector-free surfaces.
 
-The deployment module keeps credential-bearing connector construction outside the platform registry. It receives `{ db, brains, connections }`; `brains` loads active, human-approved documents and typed config from the requested client instance. `connections` can list or resolve only the requested client's active connections. Credentials are decrypted only by an explicit execution-time `resolve`/`resolveProvider` call and are not cached. The runner owns and injects the locked production model adapter separately.
+The deployment module keeps credential-bearing connector construction outside the platform registry. It receives `{ db, brains, connections, tools }`; `brains` loads active, human-approved documents and typed config from the requested client instance. `connections` can list or resolve only the requested client's active connections. `tools` constructs typed Salesforce/HubSpot CRM clients (including snapshot-before-namespaced-write), Clay enrichment, Slack/Teams delivery, and Fathom transcript readers for that tenant. Credentials are decrypted only by an explicit execution-time call and are not cached. The runner owns and injects the locked production model adapter separately.
 
 Every dependency section is a required resolver `(clientId) => deps`, so connector credentials, grading context, routing rules, templates, and destinations cannot bleed between clients:
 
@@ -30,8 +30,23 @@ Every dependency section is a required resolver `(clientId) => deps`, so connect
   deanon: (clientId) => DeanonDeps,
   learning: (clientId) => LearningLoopDeps,
   quality: (clientId) => QualityMonitorDeps,
+  outbound: (clientId) => OutboundDeps,
+  abm: (clientId) => AbmDeps,
+  takeout: (clientId) => TakeoutDeps,
+  repWorkflows: (clientId) => RepWorkflowsDeps,
+  events: (clientId) => EventsDeps,
+  copyFactory: (clientId) => CopyFactoryDeps,
+  adsSync: (clientId) => AdsSyncDeps,
+  routing: (clientId) => RoutingDeps,
+  tam: (clientId) => TamDeps,
+  etl: (clientId) => EtlDeps,
+  signals: (clientId) => SignalsDeps,
+  digests: (clientId) => DigestsDeps,
+  metrics: (clientId) => MetricsDeps,
 }
 ```
+
+The last 13 modules use the shared `GatedActionDeps` contract: `load` and `prepare` create the reviewable plan, the pipeline opens the module-appropriate human gate, and only then can `execute` reach a provider. Deployment code owns client-specific mappings and destinations, while the core owns the checkpoint and gate ordering.
 
 For example, a reactivation resolver can call `brains.loadContext(clientId, [...])` for its grading constitution and `brains.loadApprovedConfig(clientId, 'reactivation.yaml', schema)` for deterministic play/template configuration. Draft or unattributed brain artifacts are rejected before a model, connector write, or outbound action runs.
 

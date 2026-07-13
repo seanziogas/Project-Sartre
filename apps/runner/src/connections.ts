@@ -1,5 +1,5 @@
-import { CredentialVault } from '@sartre/connectors'
-import type { ToolConnectionSummary } from '@sartre/connectors'
+import { createProviderClient, CredentialVault, productionHttpTransport, refreshOAuthToken } from '@sartre/connectors'
+import type { ConnectionTester, CrmWriteOptions, HttpTransport, SupportedProvider, ToolConnectionSummary } from '@sartre/connectors'
 import { PostgresToolConnectionStore } from '@sartre/db'
 
 export interface ResolvedToolConnection {
@@ -33,5 +33,28 @@ export class TenantConnectionResolver {
     const match = (await this.store.list(clientId)).find((connection) => connection.provider === provider)
     if (!match) throw new Error(`active ${provider} connection not found for client`)
     return this.resolve(clientId, match.connectionId)
+  }
+
+  /** Construct a concrete provider client from this tenant's active credentials. */
+  async providerClient(
+    clientId: string,
+    provider: SupportedProvider,
+    http: HttpTransport = productionHttpTransport(),
+    writeOptions?: CrmWriteOptions,
+  ): Promise<ConnectionTester> {
+    const resolved = await this.resolveProvider(clientId, provider)
+    let credentials = resolved.credentials
+    if (provider !== 'clay' && resolved.connection.authKind === 'oauth' && credentials.refreshToken) {
+      credentials = await refreshOAuthToken(provider, credentials, http)
+      const stored = await this.store.get(clientId, resolved.connection.connectionId)
+      if (!stored || !this.encryptionKey) throw new Error('connection disappeared during token refresh')
+      const updatedAt = new Date().toISOString()
+      await this.store.put({
+        ...stored,
+        encryptedCredentials: new CredentialVault(this.encryptionKey).seal(credentials, clientId),
+        updatedAt,
+      })
+    }
+    return createProviderClient(provider, credentials, http, writeOptions)
   }
 }

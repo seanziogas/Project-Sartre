@@ -91,6 +91,18 @@ export const DEFAULT_MODULE_MVD: Record<string, MvdRequirement[]> = {
   'sales.reactivation': [
     { metric: 'contact_email_coverage', required: 0.8, remediationCreditsPerRecord: 3 },
   ],
+  'sales.abm': [
+    { metric: 'account_domain_coverage', required: 0.8, remediationCreditsPerRecord: 2 },
+    { metric: 'account_dedup_cleanliness', required: 0.9 },
+  ],
+  'sales.takeout': [
+    { metric: 'account_domain_coverage', required: 0.8, remediationCreditsPerRecord: 2 },
+    { metric: 'contact_email_coverage', required: 0.8, remediationCreditsPerRecord: 3 },
+  ],
+  'sales.rep-workflows': [
+    { metric: 'contact_linkage', required: 0.8 },
+    { metric: 'account_ownership', required: 0.8 },
+  ],
   'marketing.inbound': [
     { metric: 'contact_linkage', required: 0.7 },
     { metric: 'account_domain_coverage', required: 0.7, remediationCreditsPerRecord: 2 },
@@ -99,9 +111,18 @@ export const DEFAULT_MODULE_MVD: Record<string, MvdRequirement[]> = {
     { metric: 'account_domain_coverage', required: 0.7, remediationCreditsPerRecord: 2 },
     { metric: 'account_dedup_cleanliness', required: 0.85 },
   ],
+  'marketing.events': [
+    { metric: 'contact_email_coverage', required: 0.8, remediationCreditsPerRecord: 3 },
+  ],
+  'marketing.copy-factory': [],
+  'marketing.ads-sync': [
+    { metric: 'account_domain_coverage', required: 0.8, remediationCreditsPerRecord: 2 },
+    { metric: 'contact_email_coverage', required: 0.8, remediationCreditsPerRecord: 3 },
+  ],
   'sales.copilot-briefs': [
     { metric: 'account_domain_coverage', required: 0.6, remediationCreditsPerRecord: 2 },
   ],
+  'revops.etl': [],
   // platform.* modules run on whatever exists — that's their job.
   'platform.signals': [],
   'platform.quality': [],

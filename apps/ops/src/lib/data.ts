@@ -6,8 +6,8 @@ import { parseManifest } from '@sartre/core'
 import type { ClientManifest, FeedbackEvent } from '@sartre/core'
 import type { RunRecord } from '@sartre/pipelines'
 import type { DataHealthReport } from '@sartre/data'
-import { CredentialVault, ToolConnectionInput } from '@sartre/connectors'
-import type { ToolConnectionSummary } from '@sartre/connectors'
+import { createProviderClient, CredentialVault, productionHttpTransport, ToolConnectionInput } from '@sartre/connectors'
+import type { ConnectionHealth, SupportedProvider, ToolConnectionEvent, ToolConnectionSummary } from '@sartre/connectors'
 import { getOpsDatabase } from './postgres'
 import type { PendingGate } from './run-data'
 
@@ -81,6 +81,10 @@ export async function listToolConnections(clientId: string): Promise<ToolConnect
   return (await getOpsDatabase()).connections.list(clientId)
 }
 
+export async function listToolConnectionEvents(clientId: string): Promise<ToolConnectionEvent[]> {
+  return (await getOpsDatabase()).connectionEvents.list(clientId)
+}
+
 export async function connectTool(
   clientId: string,
   input: unknown,
@@ -90,8 +94,10 @@ export async function connectTool(
   const key = process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY
   if (!key) throw new Error('SARTRE_CREDENTIAL_ENCRYPTION_KEY is required to save connections')
   const now = new Date().toISOString()
-  return (await getOpsDatabase()).connections.put({
-    connectionId: randomUUID(),
+  const database = await getOpsDatabase()
+  const connectionId = randomUUID()
+  const summary = await database.connections.put({
+    connectionId,
     clientId,
     provider: parsed.provider,
     authKind: parsed.authKind,
@@ -102,13 +108,75 @@ export async function connectTool(
     createdAt: now,
     updatedAt: now,
   })
+  await database.connectionEvents.append({
+    eventId: randomUUID(), connectionId, clientId, kind: 'connected', actor,
+    detail: `${parsed.provider} connection created`, occurredAt: now,
+  })
+  return summary
 }
 
 export async function revokeToolConnection(
   clientId: string,
   connectionId: string,
+  actor: string,
 ): Promise<boolean> {
-  return (await getOpsDatabase()).connections.revoke(clientId, connectionId, new Date().toISOString())
+  const database = await getOpsDatabase()
+  const now = new Date().toISOString()
+  const revoked = await database.connections.revoke(clientId, connectionId, now)
+  if (revoked) await database.connectionEvents.append({
+    eventId: randomUUID(), connectionId, clientId, kind: 'revoked', actor,
+    detail: 'connection revoked and credential envelope destroyed', occurredAt: now,
+  })
+  return revoked
+}
+
+export async function rotateToolConnection(
+  clientId: string,
+  connectionId: string,
+  credentials: Record<string, string>,
+  actor: string,
+): Promise<ToolConnectionSummary> {
+  const key = process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY
+  if (!key) throw new Error('SARTRE_CREDENTIAL_ENCRYPTION_KEY is required to rotate connections')
+  const database = await getOpsDatabase()
+  const stored = await database.connections.get(clientId, connectionId)
+  if (!stored || stored.status !== 'active') throw new Error('active connection not found for client')
+  const existing = new CredentialVault(key).open(stored.encryptedCredentials, clientId)
+  const parsed = ToolConnectionInput.parse({
+    provider: stored.provider, authKind: stored.authKind, label: stored.label,
+    credentials: { ...existing, ...credentials }, metadata: stored.metadata,
+  })
+  const now = new Date().toISOString()
+  const summary = await database.connections.put({
+    ...stored, encryptedCredentials: new CredentialVault(key).seal(parsed.credentials, clientId), updatedAt: now,
+  })
+  await database.connectionEvents.append({
+    eventId: randomUUID(), connectionId, clientId, kind: 'rotated', actor,
+    detail: `${stored.provider} credentials rotated`, occurredAt: now,
+  })
+  return summary
+}
+
+export async function testToolConnection(
+  clientId: string,
+  connectionId: string,
+  actor: string,
+): Promise<ConnectionHealth> {
+  const key = process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY
+  if (!key) throw new Error('SARTRE_CREDENTIAL_ENCRYPTION_KEY is required to test connections')
+  const database = await getOpsDatabase()
+  const stored = await database.connections.get(clientId, connectionId)
+  if (!stored || stored.status !== 'active') throw new Error('active connection not found for client')
+  if (!['salesforce', 'hubspot', 'clay', 'slack', 'teams', 'fathom'].includes(stored.provider)) {
+    throw new Error(`connection testing is not available for ${stored.provider}`)
+  }
+  const credentials = new CredentialVault(key).open(stored.encryptedCredentials, clientId)
+  const health = await createProviderClient(stored.provider as SupportedProvider, credentials, productionHttpTransport()).testConnection()
+  await database.connectionEvents.append({
+    eventId: randomUUID(), connectionId, clientId, kind: 'tested', actor,
+    detail: health.detail, occurredAt: new Date().toISOString(),
+  })
+  return health
 }
 
 /**

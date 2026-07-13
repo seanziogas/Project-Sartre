@@ -1,3 +1,6 @@
 export * from './contract.js'
 export * from './connections.js'
 export * from './enrichment-cache.js'
+export * from './http.js'
+export * from './providers.js'
+export * from './oauth.js'

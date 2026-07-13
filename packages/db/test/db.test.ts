@@ -16,6 +16,8 @@ import {
   PostgresRunStore,
   PostgresStagingStore,
   PostgresToolConnectionStore,
+  PostgresToolConnectionEventStore,
+  PostgresConnectorSnapshotStore,
 } from '../src/index.js'
 import type { Queryable } from '../src/index.js'
 
@@ -166,6 +168,27 @@ describe('PostgresToolConnectionStore (against PGlite)', () => {
     expect(await store.list('Acme')).toHaveLength(0)
     const revoked = await store.get('Acme', listed[0]!.connectionId)
     expect(revoked).toMatchObject({ status: 'revoked', encryptedCredentials: '' })
+  })
+
+  it('records an append-only tenant-scoped connection audit trail', async () => {
+    const events = new PostgresToolConnectionEventStore(db)
+    await events.append({
+      eventId: '2af84084-109d-43fe-b9a0-406375a731f2',
+      connectionId: '9a6c8cbe-ef44-4ceb-955a-9b136de1877e',
+      clientId: 'Acme', kind: 'tested', actor: 'owner@acme.example',
+      detail: 'Salesforce API reachable', occurredAt: '2026-07-13T14:00:00Z',
+    })
+    expect(await events.list('Acme')).toEqual([expect.objectContaining({ kind: 'tested', actor: 'owner@acme.example' })])
+    expect(await events.list('OtherClient')).toHaveLength(0)
+  })
+})
+
+describe('PostgresConnectorSnapshotStore (against PGlite)', () => {
+  it('persists snapshot proof within one tenant only', async () => {
+    const acme = new PostgresConnectorSnapshotStore(db, 'Acme')
+    const ref = await acme.capture('salesforce', [{ object: 'account', externalId: '001', fields: { Kiln_Score__c: 90 } }], [{ Kiln_Score__c: 10 }])
+    expect(await acme.exists('salesforce', ref)).toBe(true)
+    expect(await new PostgresConnectorSnapshotStore(db, 'OtherClient').exists('salesforce', ref)).toBe(false)
   })
 })
 

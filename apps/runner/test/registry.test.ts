@@ -93,6 +93,11 @@ function moduleDeps(): RunnerModuleDeps {
     saveMvd: async () => undefined,
     notify: async () => undefined,
   }
+  const gatedAction = {
+    load: async () => [],
+    prepare: async () => ({ summary: 'review', items: [] }),
+    execute: async () => ({ affected: 0 }),
+  }
   return {
     enrichment: async () => enrichment,
     reactivation: async () => reactivation,
@@ -104,6 +109,19 @@ function moduleDeps(): RunnerModuleDeps {
     deanon: async () => deanon,
     learning: async () => learning,
     quality: async () => quality,
+    outbound: async () => gatedAction,
+    abm: async () => gatedAction,
+    takeout: async () => gatedAction,
+    repWorkflows: async () => gatedAction,
+    events: async () => gatedAction,
+    copyFactory: async () => gatedAction,
+    adsSync: async () => gatedAction,
+    routing: async () => gatedAction,
+    tam: async () => gatedAction,
+    etl: async () => gatedAction,
+    signals: async () => gatedAction,
+    digests: async () => gatedAction,
+    metrics: async () => gatedAction,
   }
 }
 
@@ -130,6 +148,19 @@ describe('runner production registry', () => {
     expect(registry.forModule('marketing.deanon')?.id).toBe('deanon@0.1.0')
     expect(registry.forModule('platform.learning')?.id).toBe('learning-loop@0.1.0')
     expect(registry.forModule('platform.quality')?.id).toBe('quality-monitor@0.1.0')
+    expect(registry.forModule('sales.outbound')?.id).toBe('outbound@0.1.0')
+    expect(registry.forModule('sales.abm')?.id).toBe('abm@0.1.0')
+    expect(registry.forModule('sales.takeout')?.id).toBe('competitive-takeout@0.1.0')
+    expect(registry.forModule('sales.rep-workflows')?.id).toBe('rep-workflows@0.1.0')
+    expect(registry.forModule('marketing.events')?.id).toBe('event-followup@0.1.0')
+    expect(registry.forModule('marketing.copy-factory')?.id).toBe('copy-factory@0.1.0')
+    expect(registry.forModule('marketing.ads-sync')?.id).toBe('ads-audience-sync@0.1.0')
+    expect(registry.forModule('revops.routing')?.id).toBe('revops-routing@0.1.0')
+    expect(registry.forModule('revops.tam')?.id).toBe('tam-mapping@0.1.0')
+    expect(registry.forModule('revops.etl')?.id).toBe('reporting-etl@0.1.0')
+    expect(registry.forModule('platform.signals')?.id).toBe('signal-watcher@0.1.0')
+    expect(registry.forModule('platform.digests')?.id).toBe('weekly-digests@0.1.0')
+    expect(registry.forModule('platform.metrics')?.id).toBe('metrics-reporting@0.1.0')
   })
 
   it('resolves connector and brain-derived dependencies for the run client', async () => {

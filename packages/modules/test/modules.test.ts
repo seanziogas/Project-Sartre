@@ -19,10 +19,39 @@ import {
   buildDeanonPipeline,
   buildLearningLoopPipeline,
   buildQualityMonitorPipeline,
+  buildOutboundPipeline,
+  buildAbmPipeline,
+  buildTakeoutPipeline,
+  buildRepWorkflowsPipeline,
+  buildEventsPipeline,
+  buildCopyFactoryPipeline,
+  buildAdsSyncPipeline,
+  buildRoutingPipeline,
+  buildTamPipeline,
+  buildEtlPipeline,
+  buildSignalsPipeline,
+  buildDigestsPipeline,
+  buildMetricsPipeline,
 } from '../src/index.js'
 
 const templatePath = resolve(import.meta.dirname, '../../../clients/_template/client.yaml')
 const NOW = () => new Date('2026-07-09T12:00:00Z')
+
+const remainingPipelines = [
+  ['sales.outbound', buildOutboundPipeline, 'outbound_send'],
+  ['sales.abm', buildAbmPipeline, 'outbound_send'],
+  ['sales.takeout', buildTakeoutPipeline, 'outbound_send'],
+  ['sales.rep-workflows', buildRepWorkflowsPipeline, 'crm_write'],
+  ['marketing.events', buildEventsPipeline, 'outbound_send'],
+  ['marketing.copy-factory', buildCopyFactoryPipeline, 'internal_report'],
+  ['marketing.ads-sync', buildAdsSyncPipeline, 'outbound_send'],
+  ['revops.routing', buildRoutingPipeline, 'crm_write'],
+  ['revops.tam', buildTamPipeline, 'crm_write'],
+  ['revops.etl', buildEtlPipeline, 'crm_write'],
+  ['platform.signals', buildSignalsPipeline, 'internal_report'],
+  ['platform.digests', buildDigestsPipeline, 'client_comms'],
+  ['platform.metrics', buildMetricsPipeline, 'client_comms'],
+] as const
 
 function manifest(moduleId: string, mutate: (m: ReturnType<typeof parseManifest>) => void = () => {}) {
   const m = parseManifest(readFileSync(templatePath, 'utf8'))
@@ -218,7 +247,7 @@ describe('data remediation pipeline', () => {
       prepareWrites: async (clientId, plan) => {
         clients.push(clientId)
         expect(plan.tasks.some((task) => task.metric === 'account_domain_coverage')).toBe(true)
-        expect(new Set(plan.tasks.flatMap((task) => task.blockedModules))).toEqual(new Set(['revops.enrichment']))
+        expect([...new Set(plan.tasks.flatMap((task) => task.blockedModules))]).toContain('revops.enrichment')
         return {
           writes: [{ object: 'account', externalId: 'a2', fields: { Kiln_Domain__c: 'gap.example' } }],
         }
@@ -846,5 +875,29 @@ describe('inbound routing pipeline', () => {
     expect(providerCalls).toBe(0)
     expect(run.spend.clayCredits).toBe(0)
     expect((run.checkpoints.enrich as { budgetExhaustedRowIds: string[] }).budgetExhaustedRowIds).toEqual(['l1'])
+  })
+})
+
+describe('remaining locked module pipelines', () => {
+  it.each(remainingPipelines)('%s structurally gates its external effect', async (moduleId, build, outputClass) => {
+    let executions = 0
+    const pipeline = build({
+      load: async () => [{ id: 'candidate-1' }],
+      prepare: async () => ({ summary: `${moduleId} review`, items: [{ id: 'candidate-1' }] }),
+      execute: async () => { executions++; return { affected: 1 } },
+    })
+    const store = new MemoryRunStore()
+    const runId = `remaining-${moduleId}`
+    const engine = new PipelineEngine(store, { now: NOW, runId })
+    const m = manifest(moduleId)
+
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: `review:${outputClass}`, outputClass, status: 'pending' })
+    expect(executions).toBe(0)
+
+    const completed = await engine.resolveGate(pipeline, runId, `review:${outputClass}`, 'approved', 'gtme@kiln', m)
+    expect(completed.status).toBe('completed')
+    expect(executions).toBe(1)
   })
 })

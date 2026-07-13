@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import type { FileClientBrainStore } from '@sartre/core'
 import type { Queryable } from '@sartre/db'
 import type { TenantConnectionResolver } from './connections.js'
+import type { TenantToolClients } from './tools.js'
 import type { RunnerModuleDeps } from './registry.js'
 
 export interface RunnerDeploymentContext {
@@ -12,6 +13,8 @@ export interface RunnerDeploymentContext {
   brains: FileClientBrainStore
   /** Explicit, tenant-scoped credential access for deployment-owned adapters. */
   connections: TenantConnectionResolver
+  /** Concrete Salesforce/HubSpot/Clay/Slack/Teams/Fathom clients, created per tenant. */
+  tools: TenantToolClients
 }
 
 export interface RunnerDeploymentModule {
@@ -53,6 +56,19 @@ function unconfiguredModuleDeps(): RunnerModuleDeps {
     deanon: missing('de-anonymization'),
     learning: missing('learning'),
     quality: missing('quality'),
+    outbound: missing('outbound'),
+    abm: missing('ABM'),
+    takeout: missing('competitive takeout'),
+    repWorkflows: missing('rep workflows'),
+    events: missing('event follow-up'),
+    copyFactory: missing('copy factory'),
+    adsSync: missing('ads sync'),
+    routing: missing('revops routing'),
+    tam: missing('TAM mapping'),
+    etl: missing('reporting ETL'),
+    signals: missing('signal watcher'),
+    digests: missing('weekly digests'),
+    metrics: missing('metrics reporting'),
   }
 }
 
@@ -61,7 +77,8 @@ function assertModuleDeps(value: unknown): asserts value is RunnerModuleDeps {
   const record = value as Record<string, unknown>
   for (const key of [
     'enrichment', 'reactivation', 'inbound', 'remediation', 'copilotBriefs',
-    'dedup', 'leadConvert', 'deanon', 'learning', 'quality',
+    'dedup', 'leadConvert', 'deanon', 'learning', 'quality', 'outbound', 'abm', 'takeout',
+    'repWorkflows', 'events', 'copyFactory', 'adsSync', 'routing', 'tam', 'etl', 'signals', 'digests', 'metrics',
   ]) {
     const section = record[key]
     if (typeof section !== 'function') {

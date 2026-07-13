@@ -14,7 +14,7 @@ import { z } from 'zod'
 export interface ConnectorInfo {
   id: string // e.g. "salesforce", "hubspot", "clay", "slack", "fathom"
   kind: 'crm' | 'enrichment' | 'sequencer' | 'comms' | 'meetings' | 'intent' | 'warehouse' | 'inbound'
-  capabilities: Capability[]
+  capabilities: readonly Capability[]
 }
 
 export type Capability =
@@ -30,6 +30,48 @@ export type Capability =
   | 'send_message'
   | 'read_transcripts'
   | 'convert_leads'
+  | 'test_connection'
+
+export interface ConnectionHealth {
+  ok: boolean
+  provider: string
+  accountRef: string | null
+  detail: string
+}
+
+export interface ConnectionTester {
+  info: ConnectorInfo
+  testConnection(): Promise<ConnectionHealth>
+}
+
+export interface MessageReceipt {
+  provider: string
+  destination: string
+  externalId: string
+}
+
+export interface MessageSender {
+  info: ConnectorInfo
+  sendMessage(destination: string, text: string): Promise<MessageReceipt>
+}
+
+export interface TranscriptRecord {
+  externalId: string
+  title: string
+  occurredAt: string
+  transcript: string
+  participants: string[]
+}
+
+export interface TranscriptReader {
+  info: ConnectorInfo
+  listTranscripts(cursor?: string): Promise<{ records: TranscriptRecord[]; cursor: string | null }>
+}
+
+export interface EnrichmentProvider {
+  info: ConnectorInfo
+  enrich(domain: string, fields: string[]): Promise<Record<string, string | number | boolean | null>>
+}
 
 /** Raw rows exactly as the source system returned them, plus extraction metadata. */
 export interface StagedBatch<T = Record<string, unknown>> {
@@ -118,6 +160,11 @@ export interface CrmWriter {
   /** Capture the current values of every field about to be touched. Returns a snapshot ref. */
   snapshot(writes: NamespacedWrite[]): Promise<string>
   writeNamespaced(writes: NamespacedWrite[], snapshotRef: string): Promise<WriteReceipt>
+}
+
+export interface ConnectorSnapshotStore {
+  capture(provider: string, writes: NamespacedWrite[], sourceValues: unknown[]): Promise<string>
+  exists(provider: string, snapshotRef: string): Promise<boolean>
 }
 
 /**

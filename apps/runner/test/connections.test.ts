@@ -46,4 +46,17 @@ describe('TenantConnectionResolver', () => {
     expect(await resolver.list('Acme')).toHaveLength(1)
     await expect(resolver.resolve('Acme', 'connection-1')).rejects.toThrow('SARTRE_CREDENTIAL_ENCRYPTION_KEY')
   })
+
+  it('constructs provider clients from only the current tenant connection', async () => {
+    const connection: StoredToolConnection = {
+      connectionId: 'connection-2', clientId: 'Acme', provider: 'slack', authKind: 'oauth',
+      label: 'Slack', status: 'active', metadata: {},
+      encryptedCredentials: new CredentialVault(key).seal({ accessToken: 'fake-token' }, 'Acme'),
+      createdAt: '2026-07-13T12:00:00Z', updatedAt: '2026-07-13T12:00:00Z',
+    }
+    const resolver = new TenantConnectionResolver(storeWith(connection) as never, key)
+    const client = await resolver.providerClient('Acme', 'slack', { request: async () => ({ status: 200, body: { ok: true, team_id: 'T1' }, headers: {} }) })
+    expect((await client.testConnection()).accountRef).toBe('T1')
+    await expect(resolver.providerClient('OtherClient', 'slack')).rejects.toThrow('not found')
+  })
 })

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { Account, Activity, Contact, Opportunity, Signal } from '@sartre/core'
 import type {
@@ -10,7 +10,7 @@ import type {
   Signal as SignalType,
 } from '@sartre/core'
 import { StagedBatchSchema } from '@sartre/connectors'
-import type { CacheEntry, CacheStore, ConnectionAuthKind, StagedBatch, ToolConnectionSummary } from '@sartre/connectors'
+import type { CacheEntry, CacheStore, ConnectionAuthKind, ConnectorSnapshotStore, NamespacedWrite, StagedBatch, ToolConnectionEvent, ToolConnectionSummary } from '@sartre/connectors'
 import {
   canonicalAuditRows,
   canonicalBriefContexts,
@@ -118,6 +118,28 @@ export async function migrate(db: Queryable): Promise<void> {
     CREATE INDEX IF NOT EXISTS tool_connections_client_idx
       ON tool_connections (client_id, status, provider, updated_at DESC);
 
+    CREATE TABLE IF NOT EXISTS tool_connection_events (
+      event_id       uuid PRIMARY KEY,
+      connection_id  uuid NOT NULL,
+      client_id      text NOT NULL,
+      kind           text NOT NULL CHECK (kind IN ('connected', 'rotated', 'tested', 'revoked')),
+      actor          text NOT NULL,
+      detail         text NOT NULL,
+      occurred_at    timestamptz NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS tool_connection_events_client_idx
+      ON tool_connection_events (client_id, occurred_at DESC);
+
+    CREATE TABLE IF NOT EXISTS connector_snapshots (
+      client_id    text NOT NULL,
+      snapshot_id  uuid NOT NULL,
+      provider     text NOT NULL,
+      writes       jsonb NOT NULL,
+      source_values jsonb NOT NULL,
+      created_at   timestamptz NOT NULL,
+      PRIMARY KEY (client_id, snapshot_id)
+    );
+
     CREATE TABLE IF NOT EXISTS staged_batches (
       batch_id      text PRIMARY KEY,
       client_id     text NOT NULL,
@@ -211,6 +233,63 @@ export class PostgresToolConnectionStore {
       `UPDATE tool_connections SET status = 'revoked', encrypted_credentials = '', updated_at = $3
        WHERE client_id = $1 AND connection_id = $2 AND status = 'active' RETURNING connection_id`,
       [clientId, connectionId, revokedAt],
+    )
+    return rows.length > 0
+  }
+}
+
+export class PostgresToolConnectionEventStore {
+  constructor(private readonly db: Queryable) {}
+
+  async append(event: ToolConnectionEvent): Promise<void> {
+    assertClientId(event.clientId)
+    if (!event.actor.trim()) throw new Error('connection event actor is required')
+    await this.db.query(
+      `INSERT INTO tool_connection_events (event_id, connection_id, client_id, kind, actor, detail, occurred_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (event_id) DO NOTHING`,
+      [event.eventId, event.connectionId, event.clientId, event.kind, event.actor, event.detail, event.occurredAt],
+    )
+  }
+
+  async list(clientId: string, limit = 100): Promise<ToolConnectionEvent[]> {
+    assertClientId(clientId)
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error('connection event limit must be 1-500')
+    const { rows } = await this.db.query(
+      `SELECT event_id, connection_id, client_id, kind, actor, detail, occurred_at
+       FROM tool_connection_events WHERE client_id = $1 ORDER BY occurred_at DESC LIMIT $2`,
+      [clientId, limit],
+    )
+    return rows.map((row) => {
+      const value = row as {
+        event_id: string; connection_id: string; client_id: string; kind: ToolConnectionEvent['kind'];
+        actor: string; detail: string; occurred_at: string | Date
+      }
+      return {
+        eventId: value.event_id, connectionId: value.connection_id, clientId: value.client_id,
+        kind: value.kind, actor: value.actor, detail: value.detail, occurredAt: asIsoTimestamp(value.occurred_at),
+      }
+    })
+  }
+}
+
+export class PostgresConnectorSnapshotStore implements ConnectorSnapshotStore {
+  constructor(private readonly db: Queryable, private readonly clientId: string) { assertClientId(clientId) }
+
+  async capture(provider: string, writes: NamespacedWrite[], sourceValues: unknown[]): Promise<string> {
+    if (!provider.trim() || writes.length !== sourceValues.length) throw new Error('snapshot provider and aligned source values are required')
+    const snapshotId = randomUUID()
+    await this.db.query(
+      `INSERT INTO connector_snapshots (client_id, snapshot_id, provider, writes, source_values, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [this.clientId, snapshotId, provider, JSON.stringify(writes), JSON.stringify(sourceValues), new Date().toISOString()],
+    )
+    return snapshotId
+  }
+
+  async exists(provider: string, snapshotRef: string): Promise<boolean> {
+    const { rows } = await this.db.query(
+      `SELECT snapshot_id FROM connector_snapshots WHERE client_id = $1 AND provider = $2 AND snapshot_id = $3`,
+      [this.clientId, provider, snapshotRef],
     )
     return rows.length > 0
   }

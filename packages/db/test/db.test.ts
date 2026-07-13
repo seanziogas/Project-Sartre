@@ -5,7 +5,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { parseManifest } from '@sartre/core'
 import type { Account } from '@sartre/core'
 import { EnrichmentCache } from '@sartre/connectors'
-import { mapSourceRow } from '@sartre/data'
+import { CanonicalIngestionCoordinator, mapSourceRow } from '@sartre/data'
 import { PipelineEngine, Runner, MapRegistry } from '@sartre/pipelines'
 import type { PipelineDefinition } from '@sartre/pipelines'
 import {
@@ -235,6 +235,82 @@ describe('PostgresCanonicalStore (against PGlite)', () => {
     expect(audit.accounts).toHaveLength(2)
     expect(audit.accounts[0]).toMatchObject({ domain: 'durable.example', ownerRef: 'rep-1' })
     expect(audit.contacts).toEqual([])
+  })
+
+  it('coordinates stage, promotion, and tenant-scoped relationship resolution', async () => {
+    const staging = new PostgresStagingStore(db)
+    const canonical = new PostgresCanonicalStore(db)
+    const coordinator = new CanonicalIngestionCoordinator(staging, canonical)
+    const extractedAt = '2026-07-13T12:00:00Z'
+    await canonical.put(
+      'Acme',
+      'account',
+      accountRecord('Acme', '00000000-0000-4000-8000-000000000499', 'cross-tenant-only'),
+    )
+    const accountBatch = {
+      connectorId: 'salesforce',
+      object: 'account' as const,
+      extractedAt,
+      cursor: null,
+      rows: [{ Id: 'ref-account-1', Name: 'Reference Co', Website: 'reference.example', OwnerId: 'rep-1', LastModified: extractedAt }],
+    }
+    const contactBatch = {
+      connectorId: 'salesforce',
+      object: 'contact' as const,
+      extractedAt,
+      cursor: null,
+      rows: [
+        { Id: 'ref-contact-1', FirstName: 'Jane', LastName: 'Doe', Email: 'jane@reference.example', AccountId: 'ref-account-1', OwnerId: 'rep-1', LastModified: extractedAt },
+        { Id: 'ref-contact-2', FirstName: 'Tenant', LastName: 'Boundary', Email: 'boundary@reference.example', AccountId: 'cross-tenant-only', OwnerId: 'rep-1', LastModified: extractedAt },
+      ],
+    }
+    const accountMapping = {
+      object: 'account',
+      externalIdField: 'Id',
+      fields: [
+        { source: 'Name', target: 'name', transform: 'trim' },
+        { source: 'Website', target: 'domain', transform: 'domain' },
+        { source: 'OwnerId', target: 'ownerRef', transform: 'trim' },
+        { source: 'LastModified', target: 'sourceUpdatedAt', transform: 'datetime' },
+      ],
+    }
+    const contactMapping = {
+      object: 'contact',
+      externalIdField: 'Id',
+      fields: [
+        { source: 'FirstName', target: 'firstName', transform: 'trim' },
+        { source: 'LastName', target: 'lastName', transform: 'trim' },
+        { source: 'Email', target: 'email', transform: 'email' },
+        { source: 'OwnerId', target: 'ownerRef', transform: 'trim' },
+        { source: 'LastModified', target: 'sourceUpdatedAt', transform: 'datetime' },
+      ],
+      references: [{ source: 'AccountId', target: 'accountId', recordType: 'account', required: true }],
+    }
+    const ids = [
+      '00000000-0000-4000-8000-000000000401',
+      '00000000-0000-4000-8000-000000000402',
+      '00000000-0000-4000-8000-000000000403',
+    ]
+    const result = await coordinator.refresh(
+      'ReferenceClient',
+      { accountBatch, contactBatch, accountMapping, contactMapping, runId: 'ingestion-run-1' },
+      { now: () => new Date('2026-07-13T13:00:00Z'), createId: () => ids.shift()! },
+    )
+
+    expect(result.audit.accounts).toHaveLength(1)
+    expect(result.audit.contacts).toHaveLength(2)
+    expect(result.audit.contacts.find((contact) => contact.id.endsWith('402'))?.accountRef)
+      .toBe('00000000-0000-4000-8000-000000000401')
+    expect(result.audit.contacts.find((contact) => contact.id.endsWith('403'))?.accountRef).toBeNull()
+    expect(result.contacts.problems).toEqual(expect.arrayContaining([
+      expect.objectContaining({ problem: expect.stringContaining('unresolved account reference salesforce:cross-tenant-only') }),
+    ]))
+    expect(await staging.list('ReferenceClient')).toHaveLength(2)
+
+    // Exact retry reuses staging batches and canonical external identities.
+    await coordinator.refresh('ReferenceClient', { accountBatch, contactBatch, accountMapping, contactMapping })
+    expect(await staging.list('ReferenceClient')).toHaveLength(2)
+    expect(await canonical.listAll('ReferenceClient', 'contact')).toHaveLength(2)
   })
 })
 

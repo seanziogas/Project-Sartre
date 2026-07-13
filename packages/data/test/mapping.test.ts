@@ -64,5 +64,11 @@ describe('source-to-canonical mapping', () => {
         { source: 'OtherEmail', target: 'email' },
       ],
     })).toThrow('duplicate mapping target')
+    expect(() => parseSourceMapping({
+      object: 'contact',
+      externalIdField: 'Id',
+      fields: [],
+      references: [{ source: 'AccountId', target: 'accountId', recordType: 'contact' }],
+    })).toThrow('must resolve account')
   })
 })

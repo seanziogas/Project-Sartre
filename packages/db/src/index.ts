@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { Account, Activity, Contact, Opportunity, Signal } from '@sartre/core'
 import type {
   Account as AccountType,
@@ -144,7 +145,9 @@ export class PostgresStagingStore {
     )
     const stored = await this.get(clientId, batchId)
     if (!stored) throw new Error(`staged batch ${batchId} collided with another client`)
-    if (JSON.stringify(stored.batch) !== JSON.stringify(batch)) {
+    // Postgres JSONB does not preserve object key order, so compare parsed
+    // values instead of their serialized property order.
+    if (!isDeepStrictEqual(stored.batch, batch)) {
       throw new Error(`staged batch idempotency key ${batchId} was reused with different content`)
     }
     return stored

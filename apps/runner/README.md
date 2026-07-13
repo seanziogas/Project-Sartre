@@ -24,6 +24,6 @@ Every dependency section is a required resolver `(clientId) => deps`, so connect
 
 For example, a reactivation resolver can call `brains.loadContext(clientId, [...])` for its grading constitution and `brains.loadApprovedConfig(clientId, 'reactivation.yaml', schema)` for deterministic play/template configuration. Draft or unattributed brain artifacts are rejected before a model, connector write, or outbound action runs.
 
-The enrichment resolver must implement `refreshCanonical`: stage connector batches, apply the client’s approved source mapping, call `PostgresCanonicalStore.promoteAccounts/promoteContacts`, then return `auditRows(clientId)`. The production runner cannot register enrichment against direct raw audit rows.
+The enrichment resolver must implement `refreshCanonical` using `CanonicalIngestionCoordinator` with the client’s connector batches and approved source mappings. The production runner cannot register enrichment against direct raw audit rows.
 
 Startup fails when the module is absent or incomplete. The runner never falls back to an empty registry, scripted connector, or alternate model, and deployment code cannot replace the reactivation pipeline's LLM client.

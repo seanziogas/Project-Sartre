@@ -107,9 +107,11 @@ describe('canonical candidate promotion', () => {
         { source: 'FirstName', target: 'firstName', transform: 'trim' },
         { source: 'LastName', target: 'lastName', transform: 'trim' },
         { source: 'Email', target: 'email', transform: 'email' },
-        { source: 'AccountId', target: 'accountId', transform: 'identity' },
         { source: 'OwnerId', target: 'ownerRef', transform: 'trim' },
         { source: 'LastModifiedDate', target: 'sourceUpdatedAt', transform: 'datetime' },
+      ],
+      references: [
+        { source: 'AccountId', target: 'accountId', recordType: 'account', required: true },
       ],
     } as const
     const candidate = mapSourceRow(
@@ -117,6 +119,7 @@ describe('canonical candidate promotion', () => {
       mapping,
       { clientId: 'Acme', connectorId: 'salesforce', extractedAt: '2026-07-13T12:00:00Z' },
     )
+    candidate.fields.accountId = { value: account.id, provenance: candidate.references[0]!.provenance }
     const wrongTenant = { ...candidate, clientId: 'OtherClient' }
     const promoted = promoteContactCandidates(
       'Acme',

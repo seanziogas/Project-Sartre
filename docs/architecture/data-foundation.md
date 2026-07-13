@@ -10,4 +10,6 @@ Both storage tables promote `client_id` to an indexed column. All adapter reads 
 
 `PostgresCanonicalStore.promoteAccounts/promoteContacts` apply this promotion flow against the durable client dataset and persist every changed or newly duplicate-flagged record. Its `auditRows` projection feeds the enrichment-refresh pipeline through `refreshCanonical`, so the Day-1 audit reads canonical data rather than bypassing staging and provenance.
 
+`CanonicalIngestionCoordinator` is the reusable connector-facing flow. It stages account/contact batches, applies their approved mappings, promotes accounts first, resolves contact relationship external IDs to canonical UUIDs through client-scoped lookups, promotes contacts, and returns the audit view. An unresolved relationship remains a `needs_review` orphan with an explicit problem; it never searches another client or silently drops the contact.
+
 CRM writeback remains a separate connector operation: it must pass the namespaced-field guard, create a source snapshot, and stop at a human `crm_write` gate before dispatch.

@@ -11,6 +11,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@sartre/connectors": "*",
     "@sartre/core": "*",
     "zod": "^3.25.0"
   }

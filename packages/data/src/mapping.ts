@@ -32,6 +32,14 @@ export const SourceMapping = z.object({
     transform: Transform.default('identity'),
     required: z.boolean().default(false),
   })),
+  references: z.array(z.object({
+    source: z.string().min(1),
+    target: z.enum(['accountId', 'contactId']),
+    recordType: z.enum(['account', 'contact']),
+    /** Defaults to the current connector; override for cross-source mappings. */
+    system: z.string().min(1).optional(),
+    required: z.boolean().default(false),
+  })).default([]),
 })
 export type SourceMapping = z.infer<typeof SourceMapping>
 
@@ -42,15 +50,30 @@ const TARGETS: Record<SourceObject, Set<string>> = {
     'accountType', 'ownerRef', 'sourceUpdatedAt', 'icpScore', 'icpGrade',
   ]),
   contact: new Set([
-    'accountId', 'firstName', 'lastName', 'email', 'title', 'seniority',
+    'firstName', 'lastName', 'email', 'title', 'seniority',
     'linkedinUrl', 'country', 'employmentStatus', 'doNotContact', 'ownerRef', 'sourceUpdatedAt',
   ]),
   opportunity: new Set([
-    'accountId', 'name', 'stage', 'amountUsd', 'closeDate', 'isClosed', 'isWon', 'lossReason',
+    'name', 'stage', 'amountUsd', 'closeDate', 'isClosed', 'isWon', 'lossReason',
   ]),
   activity: new Set([
-    'accountId', 'contactId', 'type', 'occurredAt', 'direction', 'summary',
+    'type', 'occurredAt', 'direction', 'summary',
   ]),
+}
+
+const REFERENCE_TARGETS: Record<SourceObject, Record<string, 'account' | 'contact'>> = {
+  account: {},
+  contact: { accountId: 'account' },
+  opportunity: { accountId: 'account' },
+  activity: { accountId: 'account', contactId: 'contact' },
+}
+
+export interface CandidateReference {
+  target: 'accountId' | 'contactId'
+  recordType: 'account' | 'contact'
+  system: string
+  externalId: string
+  provenance: ProvenanceType
 }
 
 export interface CanonicalCandidate {
@@ -60,6 +83,7 @@ export interface CanonicalCandidate {
   object: SourceObject
   externalIds: Record<string, string>
   fields: Record<string, { value: string | number | boolean | null; provenance: ProvenanceType }>
+  references: CandidateReference[]
   problems: string[]
 }
 
@@ -73,6 +97,14 @@ export function parseSourceMapping(input: unknown): SourceMapping {
     }
     if (seen.has(field.target)) throw new Error(`duplicate mapping target: ${field.target}`)
     seen.add(field.target)
+  }
+  for (const reference of mapping.references) {
+    const expected = REFERENCE_TARGETS[mapping.object][reference.target]
+    if (expected !== reference.recordType) {
+      throw new Error(`${mapping.object} reference ${reference.target} must resolve ${expected ?? 'no record type'}`)
+    }
+    if (seen.has(reference.target)) throw new Error(`duplicate mapping target: ${reference.target}`)
+    seen.add(reference.target)
   }
   return mapping
 }
@@ -114,6 +146,21 @@ export function mapSourceRow(
     }
     fields[field.target] = { value: transformed.value, provenance }
   }
+  const references: CandidateReference[] = []
+  for (const reference of mapping.references) {
+    const externalId = scalarString(row[reference.source])
+    if (externalId === null) {
+      if (reference.required) problems.push(`required reference field ${reference.source} is missing`)
+      continue
+    }
+    references.push({
+      target: reference.target,
+      recordType: reference.recordType,
+      system: reference.system ?? context.connectorId,
+      externalId,
+      provenance,
+    })
+  }
 
   return {
     clientId: context.clientId,
@@ -122,6 +169,7 @@ export function mapSourceRow(
     object: mapping.object,
     externalIds: externalId === null ? {} : { [context.connectorId]: externalId },
     fields,
+    references,
     problems,
   }
 }

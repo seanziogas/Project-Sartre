@@ -106,7 +106,7 @@ export async function migrate(db: Queryable): Promise<void> {
       batch_id      text PRIMARY KEY,
       client_id     text NOT NULL,
       connector_id  text NOT NULL,
-      object_type   text NOT NULL CHECK (object_type IN ('account', 'contact', 'opportunity', 'activity')),
+      object_type   text NOT NULL CHECK (object_type IN ('account', 'contact', 'opportunity', 'activity', 'lead')),
       extracted_at timestamptz NOT NULL,
       cursor_value  text,
       batch         jsonb NOT NULL,
@@ -114,6 +114,9 @@ export async function migrate(db: Queryable): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS staged_client_idx
       ON staged_batches (client_id, connector_id, object_type, extracted_at DESC);
+    ALTER TABLE staged_batches DROP CONSTRAINT IF EXISTS staged_batches_object_type_check;
+    ALTER TABLE staged_batches ADD CONSTRAINT staged_batches_object_type_check
+      CHECK (object_type IN ('account', 'contact', 'opportunity', 'activity', 'lead'));
 
     CREATE TABLE IF NOT EXISTS canonical_records (
       client_id    text NOT NULL,

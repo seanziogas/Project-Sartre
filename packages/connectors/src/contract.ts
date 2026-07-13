@@ -22,16 +22,18 @@ export type Capability =
   | 'read_contacts'
   | 'read_opportunities'
   | 'read_activities'
+  | 'read_leads'
   | 'write_namespaced_fields'
   | 'snapshot'
   | 'enrich'
   | 'send_message'
   | 'read_transcripts'
+  | 'convert_leads'
 
 /** Raw rows exactly as the source system returned them, plus extraction metadata. */
 export interface StagedBatch<T = Record<string, unknown>> {
   connectorId: string
-  object: 'account' | 'contact' | 'opportunity' | 'activity'
+  object: 'account' | 'contact' | 'opportunity' | 'activity' | 'lead'
   extractedAt: string
   cursor: string | null // resume point for incremental pulls
   rows: T[]
@@ -40,7 +42,7 @@ export interface StagedBatch<T = Record<string, unknown>> {
 /** Runtime boundary: raw connector payloads are untrusted even when the adapter is typed. */
 export const StagedBatchSchema = z.object({
   connectorId: z.string().min(1),
-  object: z.enum(['account', 'contact', 'opportunity', 'activity']),
+  object: z.enum(['account', 'contact', 'opportunity', 'activity', 'lead']),
   extractedAt: z.string().datetime(),
   cursor: z.string().nullable(),
   rows: z.array(z.record(z.string(), z.unknown())),
@@ -52,6 +54,30 @@ export interface CrmReader {
   pullContacts(cursor?: string): Promise<StagedBatch>
   pullOpportunities(cursor?: string): Promise<StagedBatch>
   pullActivities(cursor?: string): Promise<StagedBatch>
+  pullLeads(cursor?: string): Promise<StagedBatch>
+}
+
+export const LeadConversionRequest = z.object({
+  leadExternalId: z.string().min(1),
+  targetAccountExternalId: z.string().min(1).nullable(),
+  createAccount: z.boolean(),
+}).superRefine((request, ctx) => {
+  if (request.createAccount === (request.targetAccountExternalId !== null)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'conversion must either create an account or target one existing account' })
+  }
+})
+export type LeadConversionRequest = z.infer<typeof LeadConversionRequest>
+
+export interface LeadConversionReceipt {
+  converted: number
+  rejected: { request: LeadConversionRequest; reason: string }[]
+  snapshotRef: string
+}
+
+export interface LeadConverter {
+  info: ConnectorInfo
+  snapshotLeads(requests: LeadConversionRequest[]): Promise<string>
+  convertLeads(requests: LeadConversionRequest[], snapshotRef: string): Promise<LeadConversionReceipt>
 }
 
 export interface NamespacedWrite {

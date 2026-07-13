@@ -15,6 +15,7 @@ import {
   buildRemediationPipeline,
   buildCopilotBriefsPipeline,
   buildDedupReviewPipeline,
+  buildLeadConvertPipeline,
 } from '../src/index.js'
 
 const templatePath = resolve(import.meta.dirname, '../../../clients/_template/client.yaml')
@@ -432,6 +433,72 @@ describe('dedup review pipeline', () => {
     expect(run.gates).toHaveLength(0)
     expect(snapshots).toBe(0)
     expect(writes).toBe(0)
+  })
+})
+
+describe('lead conversion pipeline', () => {
+  it('snapshots deterministic requests, gates the full plan, and converts only after approval', async () => {
+    let snapshots = 0
+    const conversions: unknown[][] = []
+    const pipeline = buildLeadConvertPipeline({
+      sourceSystem: 'salesforce',
+      loadConversionInput: async (clientId) => ({
+        leads: [
+          { clientId, sourceSystem: 'salesforce', externalId: '00Q-ready', firstName: 'Ready', lastName: 'Lead', email: 'ready@newco.example', companyName: 'NewCo', companyDomain: 'newco.example', doNotConvert: false },
+          { clientId, sourceSystem: 'salesforce', externalId: '00Q-manual', firstName: 'Manual', lastName: 'Lead', email: null, companyName: 'Unknown', companyDomain: null, doNotConvert: false },
+        ],
+        accounts: [],
+        contacts: [],
+      }),
+      converter: {
+        snapshotLeads: async () => { snapshots++; return 'lead-snapshot-1' },
+        convertLeads: async (requests, snapshotRef) => {
+          conversions.push(requests)
+          return { converted: requests.length, rejected: [], snapshotRef }
+        },
+      },
+    })
+    const store = new MemoryRunStore()
+    const engine = new PipelineEngine(store, { now: NOW, runId: 'lead-r1' })
+    const m = manifest('revops.lead-convert')
+
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: 'review:crm_write', status: 'pending' })
+    const payload = parked.gates[0]!.payload as { decisions: { action: string }[]; requests: unknown[]; snapshotRef: string }
+    expect(payload.decisions.map((decision) => decision.action)).toEqual(['convert_new_account', 'manual_review'])
+    expect(payload.requests).toHaveLength(1)
+    expect(payload.snapshotRef).toBe('lead-snapshot-1')
+    expect(snapshots).toBe(1)
+    expect(conversions).toHaveLength(0)
+
+    const done = await engine.resolveGate(pipeline, 'lead-r1', 'review:crm_write', 'approved', 'gtme@kiln', m)
+    expect(done.status).toBe('completed')
+    expect(snapshots).toBe(1)
+    expect(conversions).toHaveLength(1)
+    expect(done.checkpoints.convert).toMatchObject({ converted: 1, snapshotRef: 'lead-snapshot-1' })
+  })
+
+  it('uses internal review and never calls the converter when no lead is safe to convert', async () => {
+    let connectorCalls = 0
+    const pipeline = buildLeadConvertPipeline({
+      sourceSystem: 'salesforce',
+      loadConversionInput: async (clientId) => ({
+        leads: [{ clientId, sourceSystem: 'salesforce', externalId: '00Q-manual', firstName: null, lastName: null, email: null, companyName: null, companyDomain: null, doNotConvert: false }],
+        accounts: [],
+        contacts: [],
+      }),
+      converter: {
+        snapshotLeads: async () => { connectorCalls++; return 'never' },
+        convertLeads: async () => { connectorCalls++; return { converted: 0, rejected: [], snapshotRef: 'never' } },
+      },
+    })
+    const run = await new PipelineEngine(new MemoryRunStore(), { now: NOW, runId: 'lead-manual-r1' })
+      .start(pipeline, manifest('revops.lead-convert'), 'Acme')
+
+    expect(run.status).toBe('awaiting_approval')
+    expect(run.gates[0]).toMatchObject({ id: 'review:internal_report', status: 'pending' })
+    expect(connectorCalls).toBe(0)
   })
 })
 

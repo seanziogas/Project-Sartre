@@ -71,6 +71,11 @@ function moduleDeps(): RunnerModuleDeps {
     prepareAnnotationWrites: async () => [],
     crm: { snapshot: async () => 'snapshot', writeNamespaced: async () => ({ written: 0, rejected: [], snapshotRef: 'snapshot' }) },
   }
+  const leadConvert = {
+    sourceSystem: 'salesforce',
+    loadConversionInput: async () => ({ leads: [], accounts: [], contacts: [] }),
+    converter: { snapshotLeads: async () => 'snapshot', convertLeads: async () => ({ converted: 0, rejected: [], snapshotRef: 'snapshot' }) },
+  }
   return {
     enrichment: async () => enrichment,
     reactivation: async () => reactivation,
@@ -78,6 +83,7 @@ function moduleDeps(): RunnerModuleDeps {
     remediation: async () => remediation,
     copilotBriefs: async () => copilotBriefs,
     dedup: async () => dedup,
+    leadConvert: async () => leadConvert,
   }
 }
 
@@ -90,12 +96,14 @@ describe('runner production registry', () => {
     expect(registry.byId('data-remediation@0.1.0')?.moduleId).toBe('revops.remediation')
     expect(registry.byId('copilot-briefs@0.1.0')?.moduleId).toBe('sales.copilot-briefs')
     expect(registry.byId('dedup-review@0.1.0')?.moduleId).toBe('revops.dedup')
+    expect(registry.byId('lead-convert@0.1.0')?.moduleId).toBe('revops.lead-convert')
     expect(registry.forModule('revops.enrichment')?.id).toBe('enrichment-refresh@0.1.0')
     expect(registry.forModule('sales.reactivation')?.id).toBe('closed-lost-reactivation@0.1.0')
     expect(registry.forModule('marketing.inbound')?.id).toBe('inbound-routing@0.1.0')
     expect(registry.forModule('revops.remediation')?.id).toBe('data-remediation@0.1.0')
     expect(registry.forModule('sales.copilot-briefs')?.id).toBe('copilot-briefs@0.1.0')
     expect(registry.forModule('revops.dedup')?.id).toBe('dedup-review@0.1.0')
+    expect(registry.forModule('revops.lead-convert')?.id).toBe('lead-convert@0.1.0')
   })
 
   it('resolves connector and brain-derived dependencies for the run client', async () => {

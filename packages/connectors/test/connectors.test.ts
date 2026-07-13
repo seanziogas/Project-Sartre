@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { partitionNamespacedWrites } from '../src/contract.js'
+import { LeadConversionRequest, partitionNamespacedWrites, StagedBatchSchema } from '../src/contract.js'
 import { EnrichmentCache, MemoryCacheStore } from '../src/enrichment-cache.js'
 import type { CachedField } from '../src/enrichment-cache.js'
 
@@ -22,6 +22,27 @@ describe('partitionNamespacedWrites', () => {
       [{ object: 'account', externalId: '1', fields: { Website: 'acme.example' } }],
       '',
     )).toThrow('namespace prefix is required')
+  })
+})
+
+describe('lead connector contracts', () => {
+  it('accepts raw lead staging batches', () => {
+    expect(StagedBatchSchema.parse({
+      connectorId: 'salesforce',
+      object: 'lead',
+      extractedAt: '2026-07-13T12:00:00Z',
+      cursor: null,
+      rows: [{ Id: '00Q-1', Email: 'buyer@acme.example' }],
+    }).object).toBe('lead')
+  })
+
+  it('requires each conversion to create or target exactly one account', () => {
+    expect(LeadConversionRequest.parse({ leadExternalId: '00Q-1', targetAccountExternalId: '001-1', createAccount: false }))
+      .toMatchObject({ targetAccountExternalId: '001-1', createAccount: false })
+    expect(() => LeadConversionRequest.parse({ leadExternalId: '00Q-1', targetAccountExternalId: null, createAccount: false }))
+      .toThrow('either create an account or target one existing account')
+    expect(() => LeadConversionRequest.parse({ leadExternalId: '00Q-1', targetAccountExternalId: '001-1', createAccount: true }))
+      .toThrow('either create an account or target one existing account')
   })
 })
 

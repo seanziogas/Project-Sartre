@@ -80,6 +80,10 @@ export const DEFAULT_MODULE_MVD: Record<string, MvdRequirement[]> = {
     { metric: 'account_ownership', required: 0.8 },
     { metric: 'account_domain_coverage', required: 0.7, remediationCreditsPerRecord: 2 },
   ],
+  'revops.lead-convert': [
+    { metric: 'account_domain_coverage', required: 0.7, remediationCreditsPerRecord: 2 },
+    { metric: 'contact_email_coverage', required: 0.8, remediationCreditsPerRecord: 3 },
+  ],
   'sales.outbound': [
     { metric: 'contact_email_coverage', required: 0.9, tolerance: 0.15, remediationCreditsPerRecord: 3 },
     { metric: 'account_dedup_cleanliness', required: 0.9 }, // existing customers/opps must be excludable

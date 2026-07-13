@@ -40,6 +40,7 @@ beforeAll(async () => {
         : ((await raw.exec(sql)), { rows: [] }),
   }
   await migrate(migrateDb)
+  await migrate(migrateDb) // migrations remain safe on an existing schema
 })
 
 function manifest() {
@@ -178,6 +179,12 @@ describe('PostgresStagingStore (against PGlite)', () => {
     await expect(store.append('Acme', { ...batch, extractedAt: 'not-a-date' })).rejects.toThrow()
     await store.append('Acme', batch, 'fixed-key')
     await expect(store.append('Acme', { ...batch, rows: [{ Id: '002' }] }, 'fixed-key')).rejects.toThrow('different content')
+    await store.append('Acme', {
+      ...batch,
+      object: 'lead',
+      rows: [{ Id: '00Q-1', Email: 'buyer@acme.example' }],
+    })
+    expect(await store.list('Acme', { object: 'lead' })).toHaveLength(1)
   })
 })
 

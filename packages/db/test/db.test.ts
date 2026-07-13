@@ -3,10 +3,18 @@ import { resolve } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { PGlite } from '@electric-sql/pglite'
 import { parseManifest } from '@sartre/core'
+import type { Account } from '@sartre/core'
 import { EnrichmentCache } from '@sartre/connectors'
 import { PipelineEngine, Runner, MapRegistry } from '@sartre/pipelines'
 import type { PipelineDefinition } from '@sartre/pipelines'
-import { migrate, PostgresCacheStore, PostgresFeedbackLog, PostgresRunStore } from '../src/index.js'
+import {
+  migrate,
+  PostgresCacheStore,
+  PostgresCanonicalStore,
+  PostgresFeedbackLog,
+  PostgresRunStore,
+  PostgresStagingStore,
+} from '../src/index.js'
 import type { Queryable } from '../src/index.js'
 
 const templatePath = resolve(import.meta.dirname, '../../../clients/_template/client.yaml')
@@ -149,3 +157,80 @@ describe('PostgresFeedbackLog (against PGlite)', () => {
     expect(await log.list('OtherClient')).toHaveLength(0)
   })
 })
+
+describe('PostgresStagingStore (against PGlite)', () => {
+  it('stores raw batches idempotently and tenant-scoped', async () => {
+    const store = new PostgresStagingStore(db)
+    const batch = {
+      connectorId: 'salesforce',
+      object: 'account' as const,
+      extractedAt: '2026-07-13T12:00:00Z',
+      cursor: 'next-1',
+      rows: [{ Id: '001', Name: 'Acme' }],
+    }
+    const first = await store.append('Acme', batch)
+    const retry = await store.append('Acme', batch)
+    expect(retry.batchId).toBe(first.batchId)
+    expect(await store.list('Acme', { connectorId: 'salesforce', object: 'account' })).toHaveLength(1)
+    expect(await store.get('OtherClient', first.batchId)).toBeNull()
+
+    await expect(store.append('Acme', { ...batch, extractedAt: 'not-a-date' })).rejects.toThrow()
+    await store.append('Acme', batch, 'fixed-key')
+    await expect(store.append('Acme', { ...batch, rows: [{ Id: '002' }] }, 'fixed-key')).rejects.toThrow('different content')
+  })
+})
+
+describe('PostgresCanonicalStore (against PGlite)', () => {
+  it('upserts validated golden records and isolates external-id lookup by client', async () => {
+    const store = new PostgresCanonicalStore(db)
+    const account = accountRecord('Acme', '00000000-0000-4000-8000-000000000101', '001-acme')
+    await store.put('Acme', 'account', account)
+
+    expect(await store.get('OtherClient', 'account', account.id)).toBeNull()
+    expect(await store.findByExternalId('OtherClient', 'account', 'salesforce', '001-acme')).toBeNull()
+    expect(await store.findByExternalId('Acme', 'account', 'salesforce', '001-acme')).toMatchObject({
+      id: account.id,
+      name: { value: 'Acme' },
+    })
+
+    const updated = { ...account, flags: ['needs_review' as const], updatedAt: '2026-07-13T13:00:00Z' }
+    await store.put('Acme', 'account', updated)
+    expect(await store.list('Acme', 'account')).toMatchObject([{ flags: ['needs_review'] }])
+    await expect(store.put('OtherClient', 'account', account)).rejects.toThrow('does not match')
+
+    const collision = accountRecord('Acme', '00000000-0000-4000-8000-000000000102', '001-acme')
+    await expect(store.put('Acme', 'account', collision)).rejects.toThrow('already belongs')
+  })
+})
+
+function accountRecord(clientId: string, id: string, externalId: string): Account {
+  const provenance = {
+    source: 'crm' as const,
+    origin: 'salesforce',
+    retrievedAt: '2026-07-13T12:00:00Z',
+    confidence: 'high' as const,
+  }
+  const field = <T>(value: T | null) => ({ value, provenance })
+  return {
+    id,
+    clientId,
+    externalIds: { salesforce: externalId },
+    createdAt: '2026-07-13T12:00:00Z',
+    updatedAt: '2026-07-13T12:00:00Z',
+    flags: [],
+    name: field('Acme'),
+    domain: field('acme.com'),
+    industry: field('Software'),
+    employeeCount: field(500),
+    revenueUsd: field(125000000),
+    revenueTier: field('$100M+'),
+    country: field('US'),
+    state: field('CA'),
+    linkedinUrl: field('linkedin.com/company/acme'),
+    parentCompanyName: field(null),
+    parentCompanyRevenueUsd: field(null),
+    accountType: field('prospect'),
+    icpScore: field(null),
+    icpGrade: field(null),
+  }
+}

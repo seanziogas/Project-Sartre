@@ -1,4 +1,5 @@
 import type { Account, Contact, Opportunity, Activity } from '@sartre/core'
+import { z } from 'zod'
 
 /**
  * Connector contract (Layer 2). Every tool connector implements the slice of
@@ -35,6 +36,15 @@ export interface StagedBatch<T = Record<string, unknown>> {
   cursor: string | null // resume point for incremental pulls
   rows: T[]
 }
+
+/** Runtime boundary: raw connector payloads are untrusted even when the adapter is typed. */
+export const StagedBatchSchema = z.object({
+  connectorId: z.string().min(1),
+  object: z.enum(['account', 'contact', 'opportunity', 'activity']),
+  extractedAt: z.string().datetime(),
+  cursor: z.string().nullable(),
+  rows: z.array(z.record(z.string(), z.unknown())),
+})
 
 export interface CrmReader {
   info: ConnectorInfo

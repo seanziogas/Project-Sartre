@@ -45,14 +45,25 @@ export class RetryingHttpTransport implements HttpTransport {
     const maxAttempts = this.options.maxAttempts ?? 3
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 5) throw new Error('maxAttempts must be 1-5')
     for (let attempt = 1; ; attempt++) {
-      const response = await this.inner.request(request)
+      let response: HttpResponse
+      try {
+        response = await this.inner.request(request)
+      } catch (error) {
+        if (request.method === 'POST' || attempt >= maxAttempts) throw error
+        await this.wait(250 * 2 ** (attempt - 1))
+        continue
+      }
       const retryable = request.method !== 'POST' && (response.status === 429 || response.status >= 500)
       if (attempt >= maxAttempts || !retryable) return response
       const retryAfterHeader = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'retry-after')?.[1]
       const retryAfter = retryDelay(retryAfterHeader)
       const milliseconds = retryAfter ?? 250 * 2 ** (attempt - 1)
-      await (this.options.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(milliseconds)
+      await this.wait(milliseconds)
     }
+  }
+
+  private wait(milliseconds: number): Promise<void> {
+    return (this.options.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(milliseconds)
   }
 }
 

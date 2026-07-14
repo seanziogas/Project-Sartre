@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseManifest } from '@sartre/core'
 import { cronMatches, MapRegistry, MemoryRunStore, PipelineEngine, Runner } from '../src/index.js'
 import type { PipelineDefinition } from '../src/index.js'
@@ -42,6 +42,7 @@ describe('cronMatches', () => {
 })
 
 describe('Runner', () => {
+  afterEach(() => vi.useRealTimers())
   const gatedPipeline: PipelineDefinition = {
     id: 'reactivation@0.1.0',
     moduleId: 'revops.enrichment',
@@ -144,14 +145,47 @@ describe('Runner', () => {
     parked.gates[0]!.status = 'approved'
     await store.save(parked)
 
+    const events: unknown[] = []
     const runner = new Runner({
       store,
       registry: new MapRegistry(), // empty — nothing registered
       manifests: async () => new Map([['Acme', m]]),
+      onOperationalEvent: (event) => events.push(event),
     })
     const report = await runner.tick()
     expect(report.resumed).toEqual([])
     expect(report.warnings.some((w) => w.includes('not in registry'))).toBe(true)
     expect(report.warnings.some((w) => w.includes('bad cron'))).toBe(true)
+    expect(events).toMatchObject([
+      { event: 'run_unresolved', fields: { runId: 'r1', clientId: 'Acme', reason: 'pipeline_missing' } },
+      { event: 'schedule_invalid', fields: { clientId: 'Acme', moduleId: 'platform.metrics' } },
+    ])
+  })
+
+  it('reports interval tick recovery and failure to lifecycle callbacks', async () => {
+    vi.useFakeTimers()
+    let fail = true
+    const completed: unknown[] = []
+    const errors: Error[] = []
+    const warnings: string[] = []
+    const runner = new Runner({
+      store: new MemoryRunStore(), registry: new MapRegistry(),
+      manifests: async () => {
+        if (fail) throw new Error('database unavailable')
+        return new Map()
+      },
+      onWarn: (message) => warnings.push(message),
+      onTickComplete: (report) => completed.push(report),
+      onTickError: (error) => errors.push(error),
+    })
+    runner.start(1_000)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(errors).toMatchObject([{ message: 'database unavailable' }])
+    expect(warnings).toEqual(['tick failed: database unavailable'])
+
+    fail = false
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(completed).toMatchObject([{ resumed: [], scheduled: [], warnings: [] }])
+    runner.stop()
   })
 })

@@ -13,6 +13,7 @@ mock-data directive): re-grade Hologram's human-graded connectivity list
 npm run build                                   # once
 node tools/shadow-hologram/build-fixtures.mjs   # reads the read-only reference copy
 node tools/shadow-hologram/run.mjs --fake       # plumbing check, no API needed
+node tools/shadow-hologram/run.mjs --fake --synthetic # CI-safe check with non-client fixtures
 node tools/shadow-hologram/run.mjs              # LIVE — needs credentials (below)
 ```
 

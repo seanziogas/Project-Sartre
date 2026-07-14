@@ -47,6 +47,16 @@ export interface RunnerDeps {
   engine?: PipelineEngine
   now?: () => Date
   onWarn?: (message: string) => void
+  /** Called after each interval-driven tick; startup callers still own their explicit first tick. */
+  onTickComplete?: (report: TickReport) => void
+  /** Called when an interval-driven tick cannot complete. */
+  onTickError?: (error: Error) => void
+  onOperationalEvent?: (event: RunnerOperationalEvent) => void
+}
+
+export interface RunnerOperationalEvent {
+  event: 'run_unresolved' | 'schedule_invalid' | 'schedule_pipeline_missing'
+  fields: Record<string, string>
 }
 
 export interface TickReport {
@@ -68,9 +78,10 @@ export class Runner {
 
   async tick(): Promise<TickReport> {
     const report: TickReport = { resumed: [], scheduled: [], warnings: [] }
-    const warn = (m: string) => {
+    const warn = (m: string, event: RunnerOperationalEvent) => {
       report.warnings.push(m)
       this.deps.onWarn?.(m)
+      this.deps.onOperationalEvent?.(event)
     }
     const manifests = await this.deps.manifests()
 
@@ -79,12 +90,16 @@ export class Runner {
       if (run.gates.some((g) => g.status === 'pending')) continue
       const def = this.deps.registry.byId(run.pipelineId)
       if (!def) {
-        warn(`run ${run.runId}: pipeline ${run.pipelineId} not in registry — cannot resume`)
+        warn(`run ${run.runId}: pipeline ${run.pipelineId} not in registry — cannot resume`, {
+          event: 'run_unresolved', fields: { runId: run.runId, clientId: run.clientId, reason: 'pipeline_missing', pipelineId: run.pipelineId },
+        })
         continue
       }
       const manifest = manifests.get(run.clientId)
       if (!manifest) {
-        warn(`run ${run.runId}: no manifest for client ${run.clientId}`)
+        warn(`run ${run.runId}: no manifest for client ${run.clientId}`, {
+          event: 'run_unresolved', fields: { runId: run.runId, clientId: run.clientId, reason: 'manifest_missing', pipelineId: run.pipelineId },
+        })
         continue
       }
       const resumed = await this.resumeDecided(def, run, manifest)
@@ -102,7 +117,9 @@ export class Runner {
         try {
           matches = cronMatches(mod.schedule, nowDate)
         } catch (err) {
-          warn(`${clientId}/${moduleId}: bad cron "${mod.schedule}": ${(err as Error).message}`)
+          warn(`${clientId}/${moduleId}: bad cron "${mod.schedule}": ${(err as Error).message}`, {
+            event: 'schedule_invalid', fields: { clientId, moduleId, schedule: mod.schedule, message: (err as Error).message },
+          })
           continue
         }
         if (!matches) continue
@@ -110,7 +127,9 @@ export class Runner {
         if (this.firedSlots.has(slotKey)) continue
         const def = this.deps.registry.forModule(moduleId)
         if (!def) {
-          warn(`${clientId}/${moduleId}: schedule fired but no pipeline registered for module`)
+          warn(`${clientId}/${moduleId}: schedule fired but no pipeline registered for module`, {
+            event: 'schedule_pipeline_missing', fields: { clientId, moduleId },
+          })
           continue
         }
         this.firedSlots.add(slotKey)
@@ -133,7 +152,13 @@ export class Runner {
   start(intervalMs = 30_000): void {
     if (this.timer) return
     this.timer = setInterval(() => {
-      void this.tick().catch((err) => this.deps.onWarn?.(`tick failed: ${(err as Error).message}`))
+      void this.tick()
+        .then((report) => this.deps.onTickComplete?.(report))
+        .catch((error: unknown) => {
+          const normalized = error instanceof Error ? error : new Error(String(error))
+          this.deps.onWarn?.(`tick failed: ${normalized.message}`)
+          this.deps.onTickError?.(normalized)
+        })
     }, intervalMs)
   }
 

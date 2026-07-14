@@ -38,6 +38,27 @@ describe('provider HTTP resilience', () => {
     expect(waits).toEqual([2000])
   })
 
+  it('retries thrown network failures only for idempotent requests', async () => {
+    let getAttempts = 0
+    const waits: number[] = []
+    const get = new RetryingHttpTransport({ request: async () => {
+      getAttempts++
+      if (getAttempts < 3) throw new TypeError('fetch failed')
+      return { status: 200, body: { ok: true }, headers: {} }
+    } }, { wait: async (milliseconds) => { waits.push(milliseconds) } })
+    await expect(get.request({ method: 'GET', url: 'https://provider.example' })).resolves.toMatchObject({ status: 200 })
+    expect(getAttempts).toBe(3)
+    expect(waits).toEqual([250, 500])
+
+    let postAttempts = 0
+    const post = new RetryingHttpTransport({ request: async () => {
+      postAttempts++
+      throw new TypeError('fetch failed')
+    } })
+    await expect(post.request({ method: 'POST', url: 'https://provider.example' })).rejects.toThrow('fetch failed')
+    expect(postAttempts).toBe(1)
+  })
+
   it('surfaces bounded provider detail without multiline log injection', async () => {
     const error = await requestJson<never>({ request: async () => ({ status: 400, body: { error: { message: `invalid\nrequest${'x'.repeat(500)}` } }, headers: {} }) }, {
       method: 'GET', url: 'https://provider.example',

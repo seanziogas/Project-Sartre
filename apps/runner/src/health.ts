@@ -1,5 +1,21 @@
 import { createServer } from 'node:http'
 
+export class ReadinessState {
+  private ready = false
+
+  isReady = (): boolean => this.ready
+  succeeded(): boolean {
+    const changed = !this.ready
+    this.ready = true
+    return changed
+  }
+  failed(): boolean {
+    const changed = this.ready
+    this.ready = false
+    return changed
+  }
+}
+
 export function startHealthServer(port: number, ready: () => boolean) {
   const server = createServer((request, response) => {
     const result = healthStatus(request.url, ready())

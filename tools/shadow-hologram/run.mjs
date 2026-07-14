@@ -7,6 +7,7 @@
 //   node tools/shadow-hologram/run.mjs             # live via Anthropic SDK (needs ANTHROPIC_API_KEY / ant profile)
 //   node tools/shadow-hologram/run.mjs --sample 20 # first N rows
 //   node tools/shadow-hologram/run.mjs --fake      # plumbing check, no model
+//   node tools/shadow-hologram/run.mjs --fake --synthetic # CI-safe plumbing check, no client fixtures
 //
 // --cli is the proven Hologram pattern (classify_accounts.py): shell out to
 // `claude -p` — Claude Code subscription auth, no API key required.
@@ -23,6 +24,7 @@ const { compareGrades, shadowReport, scoreToBand } = await import(`${ROOT}/packa
 const args = process.argv.slice(2)
 const fake = args.includes('--fake')
 const useCli = args.includes('--cli')
+const synthetic = args.includes('--synthetic')
 const sampleIdx = args.indexOf('--sample')
 const sample = sampleIdx >= 0 ? parseInt(args[sampleIdx + 1], 10) : null
 
@@ -79,6 +81,12 @@ console.log('\n' + report)
 console.log(`\nwritten: shadow-runs/hologram/report.md + machine-grades.json`)
 
 async function loadFixtures() {
+  if (synthetic) {
+    if (!fake) throw new Error('--synthetic is only supported with --fake')
+    await mkdir(FIX, { recursive: true })
+    console.log('using synthetic non-client fixtures for fake plumbing validation')
+    return syntheticFixtures()
+  }
   try {
     return {
       brainContext: await readFile(`${FIX}/brain-context.md`, 'utf8'),
@@ -89,19 +97,23 @@ async function loadFixtures() {
     if (!fake || error?.code !== 'ENOENT') throw error
     await mkdir(FIX, { recursive: true })
     console.log('fixtures absent; using synthetic non-client fixtures for fake plumbing validation')
-    return {
-      brainContext: 'Synthetic validation brain: connected device makers are in-market; software-only vendors are not.',
-      rows: [
-        { id: 'connected-health-device', fields: { name: 'Connected Health Device', description: 'Cellular remote patient monitoring hardware' } },
-        { id: 'fleet-tracker', fields: { name: 'Fleet Tracker', description: 'Cellular fleet telemetry devices' } },
-        { id: 'software-only', fields: { name: 'Software Only', description: 'Analytics software with no physical device' } },
-      ],
-      manual: [
-        { id: 'connected-health-device', grade: 'A' },
-        { id: 'fleet-tracker', grade: 'B' },
-        { id: 'software-only', grade: 'X' },
-      ],
-    }
+    return syntheticFixtures()
+  }
+}
+
+function syntheticFixtures() {
+  return {
+    brainContext: 'Synthetic validation brain: connected device makers are in-market; software-only vendors are not.',
+    rows: [
+      { id: 'connected-health-device', fields: { name: 'Connected Health Device', description: 'Cellular remote patient monitoring hardware' } },
+      { id: 'fleet-tracker', fields: { name: 'Fleet Tracker', description: 'Cellular fleet telemetry devices' } },
+      { id: 'software-only', fields: { name: 'Software Only', description: 'Analytics software with no physical device' } },
+    ],
+    manual: [
+      { id: 'connected-health-device', grade: 'A' },
+      { id: 'fleet-tracker', grade: 'B' },
+      { id: 'software-only', grade: 'X' },
+    ],
   }
 }
 

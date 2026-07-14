@@ -8,7 +8,8 @@ import { buildRegistry } from './registry.js'
 import { TenantConnectionResolver } from './connections.js'
 import { TenantToolClients } from './tools.js'
 import { loadRunnerConfig } from './config.js'
-import { startHealthServer } from './health.js'
+import { ReadinessState, startHealthServer } from './health.js'
+import { createOperationalLogger } from './operational-log.js'
 
 /**
  * Runner service entrypoint. Config via env:
@@ -41,7 +42,23 @@ async function initializeModuleDeps() {
   }
 }
 
-const log = (msg: string) => console.log(`[runner ${new Date().toISOString()}] ${msg}`)
+const log = createOperationalLogger()
+const readiness = new ReadinessState()
+let consecutiveTickFailures = 0
+
+const recordTickSuccess = (report: { resumed: unknown[]; scheduled: unknown[]; warnings: unknown[] }) => {
+  consecutiveTickFailures = 0
+  if (readiness.succeeded()) log('info', 'readiness_changed', { ready: true })
+  log('info', 'tick_completed', {
+    resumed: report.resumed.length, scheduled: report.scheduled.length, warnings: report.warnings.length,
+  })
+}
+
+const recordTickFailure = (error: Error) => {
+  consecutiveTickFailures++
+  if (readiness.failed()) log('warn', 'readiness_changed', { ready: false })
+  log('error', 'tick_failed', { message: error.message, consecutiveFailures: consecutiveTickFailures })
+}
 
 const runner = new Runner({
   store: new PostgresRunStore(connection),
@@ -52,28 +69,50 @@ const runner = new Runner({
       const runtimeMvd = await artifacts.get<typeof manifest.mvd>(clientId, 'mvd')
       if (runtimeMvd) manifest.mvd = runtimeMvd
     }))
-    for (const p of problems) log(`WARN manifest ${p.clientId}: ${p.error}`)
+    for (const p of problems) log('warn', 'manifest_invalid', { clientId: p.clientId, message: p.error })
     return manifests
   },
-  onWarn: (m) => log(`WARN ${m}`),
+  onOperationalEvent: ({ event, fields }) => log('warn', event, fields),
+  onTickComplete: recordTickSuccess,
+  onTickError: recordTickFailure,
 })
 
-let ready = false
-const healthServer = startHealthServer(config.healthPort, () => ready)
-log(`starting: clients=${config.clientsDir} store=postgres tick=${config.tickMs}ms health=${config.healthPort}`)
-// immediate first tick, then interval
-const first = await runner.tick()
-log(`tick: resumed=${first.resumed.length} scheduled=${first.scheduled.length} warnings=${first.warnings.length}`)
-ready = true
-runner.start(config.tickMs)
+const healthServer = startHealthServer(config.healthPort, readiness.isReady)
+log('info', 'runner_starting', {
+  clientsDir: config.clientsDir, store: 'postgres', tickMs: config.tickMs, healthPort: config.healthPort,
+})
 
-const shutdown = async () => {
-  runner.stop()
-  ready = false
-  await new Promise<void>((resolveClose, reject) => healthServer.close((error) => error ? reject(error) : resolveClose()))
-  await connection.close()
-  log('stopped')
-  process.exit(0)
+let shutdownPromise: Promise<void> | null = null
+const shutdown = (reason: string, exitCode = 0): Promise<void> => {
+  if (shutdownPromise) return shutdownPromise
+  shutdownPromise = (async () => {
+    runner.stop()
+    if (readiness.failed()) log('info', 'readiness_changed', { ready: false })
+    if (healthServer.listening) {
+      await new Promise<void>((resolveClose, reject) => healthServer.close((error) => error ? reject(error) : resolveClose()))
+    }
+    await connection.close()
+    log('info', 'runner_stopped', { reason, exitCode })
+    process.exitCode = exitCode
+  })()
+  return shutdownPromise
 }
-process.on('SIGINT', () => void shutdown())
-process.on('SIGTERM', () => void shutdown())
+
+healthServer.on('error', (error) => {
+  log('error', 'health_server_failed', { message: error.message })
+  void shutdown('health_server_failure', 1)
+})
+process.once('SIGINT', () => void shutdown('SIGINT'))
+process.once('SIGTERM', () => void shutdown('SIGTERM'))
+
+// Immediate first tick, then interval. Startup stays unready until the tick succeeds.
+try {
+  const first = await runner.tick()
+  recordTickSuccess(first)
+  runner.start(config.tickMs)
+} catch (error) {
+  const normalized = error instanceof Error ? error : new Error(String(error))
+  recordTickFailure(normalized)
+  await shutdown('startup_failure', 1)
+  throw normalized
+}

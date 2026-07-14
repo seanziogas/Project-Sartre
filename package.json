@@ -14,7 +14,9 @@
   "scripts": {
     "build": "tsc -b packages/* apps/runner && npm run build --workspace @sartre/ops",
     "test": "vitest run",
-    "typecheck": "tsc -b packages/* apps/runner && tsc --noEmit -p apps/ops/tsconfig.json"
+    "typecheck": "tsc -b packages/* apps/runner && tsc --noEmit -p apps/ops/tsconfig.json",
+    "preflight": "npm run preflight --workspace @sartre/runner",
+    "shadow:fake": "node tools/shadow-hologram/run.mjs --fake --synthetic"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

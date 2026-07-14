@@ -9,6 +9,7 @@ import type { DataHealthReport } from '@sartre/data'
 import { createProviderClient, CredentialVault, isSupportedProvider, productionHttpTransport, ToolConnectionInput, validateProviderCredentials } from '@sartre/connectors'
 import type { ConnectionHealth, ToolConnectionEvent, ToolConnectionSummary } from '@sartre/connectors'
 import { getOpsDatabase } from './postgres'
+import { logOpsEvent, safeOperationalMessage } from './operational-log'
 import type { PendingGate } from './run-data'
 
 /**
@@ -179,12 +180,27 @@ export async function testToolConnection(
     throw new Error(`connection testing is not available for ${stored.provider}`)
   }
   const credentials = new CredentialVault(key).open(stored.encryptedCredentials, clientId)
-  const health = await createProviderClient(stored.provider, credentials, productionHttpTransport()).testConnection()
-  await database.connectionEvents.append({
-    eventId: randomUUID(), connectionId, clientId, kind: 'tested', actor,
-    detail: health.detail, occurredAt: new Date().toISOString(),
-  })
-  return health
+  try {
+    const health = await createProviderClient(stored.provider, credentials, productionHttpTransport()).testConnection()
+    await database.connectionEvents.append({
+      eventId: randomUUID(), connectionId, clientId, kind: 'tested', actor,
+      detail: health.detail, occurredAt: new Date().toISOString(),
+    })
+    logOpsEvent('info', 'connector_test_succeeded', { clientId, connectionId, provider: stored.provider })
+    return health
+  } catch (error) {
+    const message = safeOperationalMessage(error)
+    try {
+      await database.connectionEvents.append({
+        eventId: randomUUID(), connectionId, clientId, kind: 'tested', actor,
+        detail: `connection test failed: ${message}`, occurredAt: new Date().toISOString(),
+      })
+    } catch (auditError) {
+      logOpsEvent('error', 'connector_test_audit_failed', { clientId, connectionId, provider: stored.provider, message: safeOperationalMessage(auditError) })
+    }
+    logOpsEvent('warn', 'connector_test_failed', { clientId, connectionId, provider: stored.provider, message })
+    throw error
+  }
 }
 
 /**

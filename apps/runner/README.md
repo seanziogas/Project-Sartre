@@ -8,7 +8,7 @@ Required environment:
 - `ANTHROPIC_API_KEY` — used only through `AnthropicLlmClient` with `claude-opus-4-8`.
 - `SARTRE_CLIENTS_DIR` — optional client-instance path; defaults to `clients/`.
 - `SARTRE_TICK_MS` — optional polling interval; defaults to 30 seconds.
-- `SARTRE_HEALTH_PORT` — optional liveness/readiness port; defaults to `3001`. `GET /healthz` reports process liveness and `GET /readyz` becomes ready after the first successful runner tick.
+- `SARTRE_HEALTH_PORT` — optional liveness/readiness port; defaults to `3001`. `GET /healthz` reports process liveness. `GET /readyz` becomes ready after a successful runner tick, becomes unavailable after a later tick/database failure, and recovers after the next successful tick.
 
 Connection environment:
 
@@ -18,6 +18,10 @@ Connection environment:
 The deployment adapter keeps credential-bearing connector construction outside the platform registry. It receives `{ db, brains, connections, tools }`; `brains` loads active, human-approved documents and typed config from the requested client instance. `connections` can list or resolve only the requested client's active connections. `tools` constructs tenant-scoped clients for CRM (Salesforce, HubSpot, Attio, plus read-only Pipedrive, Dynamics 365, and Zoho CRM), enrichment (Clay), collaboration (Slack, Teams), email (Gmail, Microsoft Graph), transcripts (Fathom, Gong, Fireflies, Zoom), sequencers (Smartlead, Instantly, Outreach, Salesloft, Apollo, HeyReach, lemlist, Mailshake), audiences (LinkedIn, Google, Meta), warehouses (Snowflake, BigQuery, Databricks, Redshift), intent (6sense, G2, Clearbit, Koala, Bombora), inbound sources (Qualified, LinkedIn Lead Gen, Typeform, Chili Piper), and Marketo. Credentials are decrypted only by an explicit execution-time call and are not cached. The runner owns and injects the locked production model adapter separately.
 
 The built-in adapter reads engagement inputs from tenant-scoped `standard-input:<module-id>` runtime artifacts and writes reviewed internal output to `standard-output:<module-id>` where no external transport is appropriate. It uses canonical Postgres data for enrichment, briefs, deduplication, conversion matching, and signal persistence. External CRM writes, sequence enrollment, messages, email, audience mutations, and warehouse execution are invoked only after the pipeline's structural human gate resolves. The built-in learning evaluator rejects insufficient, uncited, active, or auto-applying proposals; accepted proposals still remain drafts behind `brain_change`.
+
+Run `npm run preflight` from the repository root after building and setting deployment environment variables. It validates every active client’s manifest schedules, approved `standard-runtime.yaml`, module-specific configuration, required approved Brain documents, destinations, and active provider references. It reads connection summaries only: it does not decrypt credentials, refresh OAuth tokens, test providers, or execute module effects. A nonzero exit means the deployment is not ready.
+
+Runner lifecycle, readiness transitions, tick outcomes, invalid schedules, and runs that cannot resume are emitted as newline-delimited JSON operational events. The ops app emits the same format for connector-test success/failure; failed tests are also appended to the tenant’s connection audit history.
 
 Every dependency section is a required resolver `(clientId) => deps`, so connector credentials, grading context, routing rules, templates, and destinations cannot bleed between clients:
 

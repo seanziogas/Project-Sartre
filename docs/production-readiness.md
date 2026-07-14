@@ -11,6 +11,7 @@ The codebase is deployable; production activation still depends on deployment-ow
 - Configure `SARTRE_PUBLIC_BASE_URL` and register the exact HTTPS OAuth callback with each client-owned provider app.
 - Supply `ANTHROPIC_API_KEY` only to services that need live LLM execution. The production model remains `claude-opus-4-8`; CI and local tests use scripted fakes.
 - Route runner `GET /healthz` for liveness and `GET /readyz` for readiness on `SARTRE_HEALTH_PORT` (default `3001`). Route ops `GET /api/health` as its database readiness probe.
+- Run `npm run preflight` with deployment configuration before starting traffic. It performs metadata-only validation and never decrypts or tests provider credentials.
 - Alert on runner restarts, readiness failures, failed runs, unresolved gates, budget exhaustion, connector test failures, and quality/MVD regressions.
 - Complete a restore drill, a credential-revocation drill, and a tenant-isolation review before onboarding real client data.
 
@@ -22,7 +23,10 @@ Run from the repository root:
 npm run build
 npm test
 npm run typecheck
+npm run shadow:fake
 ```
+
+The CI workflow runs the same four gates. Its shadow check always uses three synthetic, non-client rows.
 
 Then perform provider-specific connection tests using non-production test tenants where available. Warehouse connection tests may incur a small provider-side query charge. Live connector and model verification cannot be represented by CI because credentials and real client data must remain outside git.
 

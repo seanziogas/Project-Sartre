@@ -12,6 +12,9 @@ Core commands:
 npm run build
 npm test
 npm run typecheck
+npm run shadow:fake
 ```
+
+With deployment environment variables configured, `npm run preflight` validates active client manifests, approved runtime configuration, Brain dependencies, schedules, destinations, and active connection references without decrypting credentials or calling providers.
 
 The ops portal does not require a connected tool. Each client adds only the credentials its enabled modules need; credentials remain tenant-scoped and encrypted. See [runner configuration](apps/runner/README.md), [live connectors](docs/architecture/live-connectors.md), the [production readiness checklist](docs/production-readiness.md), and the [client runtime template](clients/_template/brain/config/standard-runtime.yaml).

@@ -1,5 +1,5 @@
 import { createProviderClient, CredentialVault, productionHttpTransport, refreshOAuthToken } from '@sartre/connectors'
-import type { ConnectionTester, CrmWriteOptions, HttpTransport, SupportedProvider, ToolConnectionSummary } from '@sartre/connectors'
+import type { ConnectionTester, CrmWriteOptions, HttpTransport, OAuthProviderId, SupportedProvider, ToolConnectionSummary } from '@sartre/connectors'
 import { PostgresToolConnectionStore } from '@sartre/db'
 
 export interface ResolvedToolConnection {
@@ -44,8 +44,9 @@ export class TenantConnectionResolver {
   ): Promise<ConnectionTester> {
     const resolved = await this.resolveProvider(clientId, provider)
     let credentials = resolved.credentials
-    if (provider !== 'clay' && resolved.connection.authKind === 'oauth' && credentials.refreshToken) {
-      credentials = await refreshOAuthToken(provider, credentials, http)
+    if (['salesforce', 'hubspot', 'slack', 'teams', 'fathom'].includes(provider)
+      && resolved.connection.authKind === 'oauth' && credentials.refreshToken) {
+      credentials = await refreshOAuthToken(provider as OAuthProviderId, credentials, http)
       const stored = await this.store.get(clientId, resolved.connection.connectionId)
       if (!stored || !this.encryptionKey) throw new Error('connection disappeared during token refresh')
       const updatedAt = new Date().toISOString()

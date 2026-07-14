@@ -14,6 +14,7 @@ import {
   PostgresCanonicalStore,
   PostgresFeedbackLog,
   PostgresRunStore,
+  PostgresRuntimeArtifactStore,
   PostgresStagingStore,
   PostgresToolConnectionStore,
   PostgresToolConnectionEventStore,
@@ -121,6 +122,15 @@ describe('PostgresRunStore (against PGlite)', () => {
       actor: 'second',
       resolvedAt: '2026-07-10T12:00:01Z',
     })).rejects.toThrow('already approved')
+  })
+})
+
+describe('PostgresRuntimeArtifactStore (against PGlite)', () => {
+  it('keeps machine-owned MVD and reports tenant scoped', async () => {
+    const store = new PostgresRuntimeArtifactStore(db)
+    await store.put('ArtifactAcme', 'mvd', { 'revops.tam': { status: 'green' } })
+    expect(await store.get('ArtifactAcme', 'mvd')).toEqual({ 'revops.tam': { status: 'green' } })
+    expect(await store.get('OtherClient', 'mvd')).toBeNull()
   })
 })
 

@@ -4,6 +4,7 @@ import {
   migrate,
   PostgresFeedbackLog,
   PostgresRunStore,
+  PostgresRuntimeArtifactStore,
   PostgresToolConnectionStore,
   PostgresToolConnectionEventStore,
 } from '@sartre/db'
@@ -13,6 +14,7 @@ interface OpsDatabase {
   data: OpsRunData
   connections: PostgresToolConnectionStore
   connectionEvents: PostgresToolConnectionEventStore
+  artifacts: PostgresRuntimeArtifactStore
 }
 
 const globalDatabase = globalThis as typeof globalThis & {
@@ -34,6 +36,7 @@ async function initialize(): Promise<OpsDatabase> {
       data: new OpsRunData(new PostgresRunStore(connection), new PostgresFeedbackLog(connection)),
       connections: new PostgresToolConnectionStore(connection),
       connectionEvents: new PostgresToolConnectionEventStore(connection),
+      artifacts: new PostgresRuntimeArtifactStore(connection),
     }
   } catch (error) {
     await connection.close()

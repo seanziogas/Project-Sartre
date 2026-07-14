@@ -10,8 +10,11 @@ The first portfolio-frequency tier is implemented in `@sartre/connectors` behind
 | Slack | OAuth health and approved message delivery |
 | Microsoft Teams | Microsoft Graph health and approved channel-message delivery |
 | Fathom | Meeting/transcript reads through API key or OAuth; token exchange/refresh |
+| Smartlead | API health and reviewed bulk lead enrollment into an existing campaign |
+| Instantly | API health and reviewed bulk lead enrollment into an existing campaign |
+| LinkedIn Ads | Marketing API health and reviewed Matched Audience email add/remove batches; emails are normalized and SHA-256 hashed locally |
 
-Provider behavior follows the current official surfaces: Salesforce REST resources under the versioned `/services/data/v67.0` root, HubSpot CRM object APIs and 2026-03 OAuth endpoints, Slack Web API v2 OAuth and `chat.postMessage`, Microsoft Graph channel messages, and Fathom External API meetings/transcripts. Clay is intentionally a client-configured webhook because portfolio Clay tables and waterfall schemas vary by client; the adapter does not assume a shared table.
+Provider behavior follows the current official surfaces: Salesforce REST resources under the versioned `/services/data/v67.0` root, HubSpot `/crm/v3/objects` APIs and 2026-03 OAuth endpoints, Slack Web API v2 OAuth and `chat.postMessage`, Microsoft Graph channel messages, Fathom External API meetings/transcripts, Smartlead campaign leads, Instantly v2 bulk leads, and LinkedIn DMP Segment Users. Clay is intentionally a client-configured webhook because portfolio Clay tables and waterfall schemas vary by client; the adapter does not assume a shared table.
 
 Every client is resolved through `TenantConnectionResolver`. OAuth callback state is encrypted, client-bound, actor-bound, and expires after ten minutes. Access/refresh tokens are stored in the same encrypted connection envelope; rotating providers receive their new refresh token on refresh. The runner's `TenantToolClients` constructs clients per execution and never caches cleartext.
 
@@ -25,3 +28,6 @@ Official references:
 - [Slack Web API](https://docs.slack.dev/apis/web-api/)
 - [Microsoft Graph channel messages](https://learn.microsoft.com/en-us/graph/api/chatmessage-post?view=graph-rest-1.0)
 - [Fathom meetings API](https://developers.fathom.ai/api-reference/meetings/list-meetings)
+- [Smartlead campaign leads](https://api.smartlead.ai/api-reference/campaigns/add-leads)
+- [Instantly bulk leads](https://developer.instantly.ai/api-reference/lead/add-leads-in-bulk-to-a-campaign-or-list)
+- [LinkedIn DMP Segment Users](https://learn.microsoft.com/en-us/linkedin/marketing/matched-audiences/create-and-manage-segment-users)

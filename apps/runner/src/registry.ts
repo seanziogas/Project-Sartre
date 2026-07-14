@@ -71,7 +71,8 @@ export interface RunnerModuleDeps {
   outbound(clientId: string): OutboundDeps | Promise<OutboundDeps>
   abm(clientId: string): AbmDeps | Promise<AbmDeps>
   takeout(clientId: string): TakeoutDeps | Promise<TakeoutDeps>
-  repWorkflows(clientId: string): RepWorkflowsDeps | Promise<RepWorkflowsDeps>
+  /** The runner injects the production LLM; deployments cannot replace it. */
+  repWorkflows(clientId: string): Omit<RepWorkflowsDeps, 'llm'> | Promise<Omit<RepWorkflowsDeps, 'llm'>>
   events(clientId: string): EventsDeps | Promise<EventsDeps>
   copyFactory(clientId: string): CopyFactoryDeps | Promise<CopyFactoryDeps>
   adsSync(clientId: string): AdsSyncDeps | Promise<AdsSyncDeps>
@@ -80,7 +81,8 @@ export interface RunnerModuleDeps {
   etl(clientId: string): EtlDeps | Promise<EtlDeps>
   signals(clientId: string): SignalsDeps | Promise<SignalsDeps>
   digests(clientId: string): DigestsDeps | Promise<DigestsDeps>
-  metrics(clientId: string): MetricsDeps | Promise<MetricsDeps>
+  /** The runner injects the production LLM; deployments cannot replace it. */
+  metrics(clientId: string): Omit<MetricsDeps, 'llm'> | Promise<Omit<MetricsDeps, 'llm'>>
 }
 
 /**
@@ -96,6 +98,8 @@ export function buildRegistry(deps: RunnerModuleDeps, llm: LlmClient): MapRegist
     const clientDeps = await deps.copilotBriefs(clientId)
     return { ...clientDeps, llm }
   }
+  const repWorkflows = async (clientId: string): Promise<RepWorkflowsDeps> => ({ ...await deps.repWorkflows(clientId), llm })
+  const metrics = async (clientId: string): Promise<MetricsDeps> => ({ ...await deps.metrics(clientId), llm })
   return new MapRegistry()
     .register(buildEnrichmentRefreshPipeline(deps.enrichment))
     .register(buildReactivationPipeline(reactivation))
@@ -110,7 +114,7 @@ export function buildRegistry(deps: RunnerModuleDeps, llm: LlmClient): MapRegist
     .register(buildOutboundPipeline(deps.outbound))
     .register(buildAbmPipeline(deps.abm))
     .register(buildTakeoutPipeline(deps.takeout))
-    .register(buildRepWorkflowsPipeline(deps.repWorkflows))
+    .register(buildRepWorkflowsPipeline(repWorkflows))
     .register(buildEventsPipeline(deps.events))
     .register(buildCopyFactoryPipeline(deps.copyFactory))
     .register(buildAdsSyncPipeline(deps.adsSync))
@@ -119,5 +123,5 @@ export function buildRegistry(deps: RunnerModuleDeps, llm: LlmClient): MapRegist
     .register(buildEtlPipeline(deps.etl))
     .register(buildSignalsPipeline(deps.signals))
     .register(buildDigestsPipeline(deps.digests))
-    .register(buildMetricsPipeline(deps.metrics))
+    .register(buildMetricsPipeline(metrics))
 }

@@ -14,7 +14,7 @@ Connection environment:
 - `SARTRE_MODULE_DEPS` — optional path to a deployment-owned ESM module exporting `createModuleDeps(context)`. The service and portal start without it; a module reports an explicit configuration error only when execution needs unresolved dependencies.
 - `SARTRE_CREDENTIAL_ENCRYPTION_KEY` — 32 random bytes encoded as base64. It is required to create or use a client connection, not to access Sartre or run connector-free surfaces.
 
-The deployment module keeps credential-bearing connector construction outside the platform registry. It receives `{ db, brains, connections, tools }`; `brains` loads active, human-approved documents and typed config from the requested client instance. `connections` can list or resolve only the requested client's active connections. `tools` constructs typed Salesforce/HubSpot CRM clients (including snapshot-before-namespaced-write), Clay enrichment, Slack/Teams delivery, and Fathom transcript readers for that tenant. Credentials are decrypted only by an explicit execution-time call and are not cached. The runner owns and injects the locked production model adapter separately.
+The deployment module keeps credential-bearing connector construction outside the platform registry. It receives `{ db, brains, connections, tools }`; `brains` loads active, human-approved documents and typed config from the requested client instance. `connections` can list or resolve only the requested client's active connections. `tools` constructs typed Salesforce/HubSpot CRM clients (including snapshot-before-namespaced-write), Clay enrichment, Slack/Teams delivery, Fathom transcript readers, Smartlead/Instantly enrollment clients, and LinkedIn Matched Audiences for that tenant. Credentials are decrypted only by an explicit execution-time call and are not cached. The runner owns and injects the locked production model adapter separately.
 
 Every dependency section is a required resolver `(clientId) => deps`, so connector credentials, grading context, routing rules, templates, and destinations cannot bleed between clients:
 
@@ -33,7 +33,7 @@ Every dependency section is a required resolver `(clientId) => deps`, so connect
   outbound: (clientId) => OutboundDeps,
   abm: (clientId) => AbmDeps,
   takeout: (clientId) => TakeoutDeps,
-  repWorkflows: (clientId) => RepWorkflowsDeps,
+  repWorkflows: (clientId) => Omit<RepWorkflowsDeps, 'llm'>,
   events: (clientId) => EventsDeps,
   copyFactory: (clientId) => CopyFactoryDeps,
   adsSync: (clientId) => AdsSyncDeps,
@@ -42,11 +42,13 @@ Every dependency section is a required resolver `(clientId) => deps`, so connect
   etl: (clientId) => EtlDeps,
   signals: (clientId) => SignalsDeps,
   digests: (clientId) => DigestsDeps,
-  metrics: (clientId) => MetricsDeps,
+  metrics: (clientId) => Omit<MetricsDeps, 'llm'>,
 }
 ```
 
-The last 13 modules use the shared `GatedActionDeps` contract: `load` and `prepare` create the reviewable plan, the pipeline opens the module-appropriate human gate, and only then can `execute` reach a provider. Deployment code owns client-specific mappings and destinations, while the core owns the checkpoint and gate ordering.
+The last 13 modules now expose dedicated contracts and workflows. Campaign Factory generates outbound and copy-factory drafts; Router makes revops routing decisions; Reply Handler drafts sequence responses; Signal Watcher matches approved signal rules; and SOW/QBR Generator produces grounded metrics reports. ABM, takeout, event, audience, TAM, ETL, and digest pipelines have domain-specific input and plan types. Every external effect remains after its module-appropriate human gate. Rep workflows open separate gates when a batch contains both outbound replies and CRM actions.
+
+Machine-owned MVD state and health reports are stored per tenant in Postgres `runtime_artifacts`. The runner overlays current MVD state onto the git-backed manifest at execution time, and the ops surface reads the same state. Human-authored module configuration and approved Brain documents remain git-backed.
 
 For example, a reactivation resolver can call `brains.loadContext(clientId, [...])` for its grading constitution and `brains.loadApprovedConfig(clientId, 'reactivation.yaml', schema)` for deterministic play/template configuration. Draft or unattributed brain artifacts are rejected before a model, connector write, or outbound action runs.
 

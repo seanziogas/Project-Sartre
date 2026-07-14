@@ -55,7 +55,14 @@ export async function listClients(): Promise<ClientSummary[]> {
 export async function getManifest(clientId: string): Promise<ClientManifest | null> {
   if (clientId.includes('/') || clientId.includes('..')) return null // path safety
   try {
-    return parseManifest(await readFile(join(CLIENTS_DIR, clientId, 'client.yaml'), 'utf8'))
+    const manifest = parseManifest(await readFile(join(CLIENTS_DIR, clientId, 'client.yaml'), 'utf8'))
+    try {
+      const runtimeMvd = await (await getOpsDatabase()).artifacts.get<ClientManifest['mvd']>(clientId, 'mvd')
+      if (runtimeMvd) manifest.mvd = runtimeMvd
+    } catch {
+      // The manifest remains readable during initial DB setup or a transient DB outage.
+    }
+    return manifest
   } catch {
     return null
   }
@@ -167,7 +174,7 @@ export async function testToolConnection(
   const database = await getOpsDatabase()
   const stored = await database.connections.get(clientId, connectionId)
   if (!stored || stored.status !== 'active') throw new Error('active connection not found for client')
-  if (!['salesforce', 'hubspot', 'clay', 'slack', 'teams', 'fathom'].includes(stored.provider)) {
+  if (!['salesforce', 'hubspot', 'clay', 'slack', 'teams', 'fathom', 'smartlead', 'instantly', 'linkedin-ads'].includes(stored.provider)) {
     throw new Error(`connection testing is not available for ${stored.provider}`)
   }
   const credentials = new CredentialVault(key).open(stored.encryptedCredentials, clientId)
@@ -197,6 +204,12 @@ export async function decideGate(
 
 export async function getHealthReport(clientId: string): Promise<DataHealthReport | null> {
   if (clientId.includes('/') || clientId.includes('..')) return null
+  try {
+    const report = await (await getOpsDatabase()).artifacts.get<DataHealthReport>(clientId, 'health-report')
+    if (report) return report
+  } catch {
+    // Retain the file fallback for deployments upgraded from the v1 file store.
+  }
   try {
     const raw = await readFile(
       join(DATA_DIR, clientId.replace(/[^a-zA-Z0-9 _.-]/g, '_'), 'health-report.json'),

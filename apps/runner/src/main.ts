@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { FileClientBrainStore, loadManifestsFromDir } from '@sartre/core'
-import { createPostgresConnection, migrate, PostgresRunStore, PostgresToolConnectionStore } from '@sartre/db'
+import { createPostgresConnection, migrate, PostgresRunStore, PostgresRuntimeArtifactStore, PostgresToolConnectionStore } from '@sartre/db'
 import { Runner } from '@sartre/pipelines'
 import { AnthropicLlmClient } from '@sartre/skills'
 import { loadModuleDeps } from './deployment.js'
@@ -28,6 +28,7 @@ const connections = new TenantConnectionResolver(
   process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY,
 )
 const tools = new TenantToolClients(connection, connections)
+const artifacts = new PostgresRuntimeArtifactStore(connection)
 const moduleDeps = await initializeModuleDeps()
 
 async function initializeModuleDeps() {
@@ -47,6 +48,10 @@ const runner = new Runner({
   registry: buildRegistry(moduleDeps, llm),
   manifests: async () => {
     const { manifests, problems } = await loadManifestsFromDir(clientsDir)
+    await Promise.all([...manifests].map(async ([clientId, manifest]) => {
+      const runtimeMvd = await artifacts.get<typeof manifest.mvd>(clientId, 'mvd')
+      if (runtimeMvd) manifest.mvd = runtimeMvd
+    }))
     for (const p of problems) log(`WARN manifest ${p.clientId}: ${p.error}`)
     return manifests
   },

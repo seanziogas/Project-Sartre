@@ -13,7 +13,7 @@ import { z } from 'zod'
 
 export interface ConnectorInfo {
   id: string // e.g. "salesforce", "hubspot", "clay", "slack", "fathom"
-  kind: 'crm' | 'enrichment' | 'sequencer' | 'comms' | 'meetings' | 'intent' | 'warehouse' | 'inbound'
+  kind: 'crm' | 'enrichment' | 'sequencer' | 'comms' | 'meetings' | 'intent' | 'ads' | 'warehouse' | 'inbound'
   capabilities: readonly Capability[]
 }
 
@@ -29,6 +29,8 @@ export type Capability =
   | 'enrich'
   | 'send_message'
   | 'read_transcripts'
+  | 'enroll_sequence'
+  | 'sync_audience'
   | 'convert_leads'
   | 'test_connection'
 
@@ -71,6 +73,33 @@ export interface TranscriptReader {
 export interface EnrichmentProvider {
   info: ConnectorInfo
   enrich(domain: string, fields: string[]): Promise<Record<string, string | number | boolean | null>>
+}
+
+export interface SequenceLead {
+  email: string
+  firstName?: string
+  lastName?: string
+  companyName?: string
+  customFields?: Record<string, string | number | boolean | null>
+}
+
+export interface SequenceEnrollmentReceipt {
+  provider: string
+  campaignId: string
+  enrolled: number
+  skipped: number
+}
+
+/** A sequencer may enroll reviewed leads, but never receives unreviewed drafts. */
+export interface SequencerClient {
+  info: ConnectorInfo
+  enroll(campaignId: string, leads: SequenceLead[]): Promise<SequenceEnrollmentReceipt>
+}
+
+export interface AudienceSyncReceipt { provider: string; audienceId: string; added: number; removed: number }
+export interface AudienceSyncClient {
+  info: ConnectorInfo
+  syncEmails(audienceId: string, add: string[], remove: string[]): Promise<AudienceSyncReceipt>
 }
 
 /** Raw rows exactly as the source system returned them, plus extraction metadata. */

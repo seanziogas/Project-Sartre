@@ -8,6 +8,12 @@ describe('provider OAuth', () => {
     expect(slack.origin + slack.pathname).toBe('https://slack.com/oauth/v2/authorize')
     expect(slack.searchParams.get('state')).toBe('signed-state')
     expect(slack.searchParams.get('scope')).toContain('chat:write')
+    const fathom = new URL(oauthAuthorizationUrl('fathom', {
+      clientId: 'client', redirectUri: 'https://sartre.example/callback', state: 'signed-state',
+      loginUrl: 'https://app.fathom.video/oauth/authorize',
+    }))
+    expect(fathom.hostname).toBe('app.fathom.video')
+    expect(fathom.searchParams.get('state')).toBe('signed-state')
   })
 
   it('exchanges callback codes with secrets only in a form body', async () => {

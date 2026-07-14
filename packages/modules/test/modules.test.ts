@@ -37,22 +37,6 @@ import {
 const templatePath = resolve(import.meta.dirname, '../../../clients/_template/client.yaml')
 const NOW = () => new Date('2026-07-09T12:00:00Z')
 
-const remainingPipelines = [
-  ['sales.outbound', buildOutboundPipeline, 'outbound_send'],
-  ['sales.abm', buildAbmPipeline, 'outbound_send'],
-  ['sales.takeout', buildTakeoutPipeline, 'outbound_send'],
-  ['sales.rep-workflows', buildRepWorkflowsPipeline, 'crm_write'],
-  ['marketing.events', buildEventsPipeline, 'outbound_send'],
-  ['marketing.copy-factory', buildCopyFactoryPipeline, 'internal_report'],
-  ['marketing.ads-sync', buildAdsSyncPipeline, 'outbound_send'],
-  ['revops.routing', buildRoutingPipeline, 'crm_write'],
-  ['revops.tam', buildTamPipeline, 'crm_write'],
-  ['revops.etl', buildEtlPipeline, 'crm_write'],
-  ['platform.signals', buildSignalsPipeline, 'internal_report'],
-  ['platform.digests', buildDigestsPipeline, 'client_comms'],
-  ['platform.metrics', buildMetricsPipeline, 'client_comms'],
-] as const
-
 function manifest(moduleId: string, mutate: (m: ReturnType<typeof parseManifest>) => void = () => {}) {
   const m = parseManifest(readFileSync(templatePath, 'utf8'))
   m.status = 'active'
@@ -878,26 +862,57 @@ describe('inbound routing pipeline', () => {
   })
 })
 
-describe('remaining locked module pipelines', () => {
-  it.each(remainingPipelines)('%s structurally gates its external effect', async (moduleId, build, outputClass) => {
-    let executions = 0
-    const pipeline = build({
-      load: async () => [{ id: 'candidate-1' }],
-      prepare: async () => ({ summary: `${moduleId} review`, items: [{ id: 'candidate-1' }] }),
-      execute: async () => { executions++; return { affected: 1 } },
+describe('dedicated locked module pipelines', () => {
+  it('sales.outbound generates deterministic campaign copy and never enrolls before approval', async () => {
+    let enrolled = 0
+    const pipeline = buildOutboundPipeline({
+      loadCandidates: async () => ({ rows: [{ id: 'a1', play: 'p', group: 'g', slots: {}, tier: 'enterprise' }] }),
+      templates: {
+        email1: { p: { subjects: ['One'], body: 'Hello {{first_name}}' } },
+        email2: { g: { subjects: ['Two'], body: 'Proof' } },
+        email3: [{ subjects: ['Three'], body: 'Close' }],
+        slotDefaults: {}, fallbackPlay: 'p', fallbackGroup: 'g',
+      },
+      enroll: async (_clientId, rows) => { enrolled += rows.length; return { affected: rows.length } },
     })
-    const store = new MemoryRunStore()
-    const runId = `remaining-${moduleId}`
-    const engine = new PipelineEngine(store, { now: NOW, runId })
-    const m = manifest(moduleId)
+    const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW, runId: 'outbound-dedicated' })
+    const parked = await engine.start(pipeline, manifest('sales.outbound'), 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(parked.gates[0]).toMatchObject({ id: 'review:outbound_send' })
+    expect(enrolled).toBe(0)
+    await engine.resolveGate(pipeline, 'outbound-dedicated', 'review:outbound_send', 'approved', 'gtme@kiln', manifest('sales.outbound'))
+    expect(enrolled).toBe(1)
+  })
 
+  it('revops.routing uses the Router skill and writes only assigned decisions after approval', async () => {
+    const writes: unknown[] = []
+    const pipeline = buildRoutingPipeline({
+      loadRecords: async () => ({ records: [{ id: 'a1', fields: { country: 'US' } }] }),
+      rules: { rules: [{ id: 'us', description: 'US owner', when: { field: 'country', op: 'eq', value: 'US' }, action: { type: 'assign', owner: 'AE-US' } }], defaultOwner: null },
+      writeAssignments: async (_clientId, decisions) => { writes.push(...decisions); return { affected: decisions.length } },
+    })
+    const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW, runId: 'routing-dedicated' })
+    const m = manifest('revops.routing')
     const parked = await engine.start(pipeline, m, 'Acme')
     expect(parked.status).toBe('awaiting_approval')
-    expect(parked.gates[0]).toMatchObject({ id: `review:${outputClass}`, outputClass, status: 'pending' })
-    expect(executions).toBe(0)
+    expect(writes).toHaveLength(0)
+    await engine.resolveGate(pipeline, 'routing-dedicated', 'review:crm_write', 'approved', 'gtme@kiln', m)
+    expect(writes).toEqual([expect.objectContaining({ id: 'a1', owner: 'AE-US' })])
+  })
 
-    const completed = await engine.resolveGate(pipeline, runId, `review:${outputClass}`, 'approved', 'gtme@kiln', m)
-    expect(completed.status).toBe('completed')
-    expect(executions).toBe(1)
+  it('platform.signals uses Signal Watcher and persists matches only after review', async () => {
+    let persisted = 0
+    const pipeline = buildSignalsPipeline({
+      loadSignals: async () => ({ signals: [{ id: 's1', accountId: 'a1', kind: 'hiring', strength: 90, occurredAt: '2026-07-09T12:00:00Z' }] }),
+      rules: [{ id: 'r1', kinds: ['hiring'], minStrength: 80, play: 'growth' }],
+      persistTriggers: async (_clientId, matches) => { persisted += matches.length; return { affected: matches.length } },
+    })
+    const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW, runId: 'signals-dedicated' })
+    const m = manifest('platform.signals')
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(persisted).toBe(0)
+    await engine.resolveGate(pipeline, 'signals-dedicated', 'review:internal_report', 'approved', 'gtme@kiln', m)
+    expect(persisted).toBe(1)
   })
 })

@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto'
 import type {
+  AudienceSyncClient,
+  AudienceSyncReceipt,
   ConnectionHealth,
   ConnectionTester,
   ConnectorInfo,
@@ -12,6 +15,9 @@ import type {
   TranscriptReader,
   TranscriptRecord,
   NamespacedWrite,
+  SequenceLead,
+  SequenceEnrollmentReceipt,
+  SequencerClient,
   WriteReceipt,
 } from './contract.js'
 import { partitionNamespacedWrites } from './contract.js'
@@ -122,7 +128,7 @@ export class HubSpotClient extends BearerProvider implements CrmReader, CrmWrite
     if (rejected.length) throw new Error(rejected[0]!.reason)
     const sourceValues = await Promise.all(allowed.map((write) => {
       const params = new URLSearchParams({ properties: Object.keys(write.fields).join(',') })
-      return requestJson<unknown>(this.http, { method: 'GET', url: `${this.base}/crm/objects/2026-03/${hubspotObject(write.object)}/${encodeURIComponent(write.externalId)}?${params}`, headers: this.headers() })
+      return requestJson<unknown>(this.http, { method: 'GET', url: `${this.base}/crm/v3/objects/${hubspotObject(write.object)}/${encodeURIComponent(write.externalId)}?${params}`, headers: this.headers() })
     }))
     return options.snapshots.capture('hubspot', allowed, sourceValues)
   }
@@ -131,7 +137,7 @@ export class HubSpotClient extends BearerProvider implements CrmReader, CrmWrite
     if (!await options.snapshots.exists('hubspot', snapshotRef)) throw new Error('valid HubSpot snapshot is required before write')
     const { allowed, rejected } = partitionNamespacedWrites(writes, options.namespacePrefix)
     for (const write of allowed) await requestJson(this.http, {
-      method: 'PATCH', url: `${this.base}/crm/objects/2026-03/${hubspotObject(write.object)}/${encodeURIComponent(write.externalId)}`,
+      method: 'PATCH', url: `${this.base}/crm/v3/objects/${hubspotObject(write.object)}/${encodeURIComponent(write.externalId)}`,
       headers: this.headers(), body: JSON.stringify({ properties: write.fields }),
     })
     return { written: allowed.length, rejected, snapshotRef }
@@ -144,7 +150,7 @@ export class HubSpotClient extends BearerProvider implements CrmReader, CrmWrite
     const params = new URLSearchParams({ limit: '100' })
     if (cursor) params.set('after', cursor)
     const value = await requestJson<{ results?: unknown[]; paging?: { next?: { after?: string } } }>(this.http, {
-      method: 'GET', url: `${this.base}/crm/objects/2026-03/${objectType}?${params}`, headers: this.headers(),
+      method: 'GET', url: `${this.base}/crm/v3/objects/${objectType}?${params}`, headers: this.headers(),
     })
     return { connectorId: 'hubspot', object, extractedAt: now(), cursor: value.paging?.next?.after ?? null, rows: objectRows(value.results) }
   }
@@ -234,7 +240,77 @@ export class FathomClient implements TranscriptReader, ConnectionTester {
   }
 }
 
-export type SupportedProvider = 'salesforce' | 'hubspot' | 'clay' | 'slack' | 'teams' | 'fathom'
+export class SmartleadClient implements SequencerClient, ConnectionTester {
+  readonly info = { id: 'smartlead', kind: 'sequencer' as const, capabilities: ['enroll_sequence', 'test_connection'] as const }
+  constructor(private readonly apiKey: string, private readonly http: HttpTransport) {}
+  async testConnection(): Promise<ConnectionHealth> {
+    await requestJson(this.http, { method: 'GET', url: `https://server.smartlead.ai/api/v1/campaigns?api_key=${encodeURIComponent(this.apiKey)}` })
+    return { ok: true, provider: 'smartlead', accountRef: null, detail: 'Smartlead API reachable' }
+  }
+  async enroll(campaignId: string, leads: SequenceLead[]): Promise<SequenceEnrollmentReceipt> {
+    if (!campaignId.trim()) throw new Error('Smartlead campaignId is required')
+    const value = await requestJson<{ added_count?: number; skipped_count?: number }>(this.http, {
+      method: 'POST',
+      url: `https://server.smartlead.ai/api/v1/campaigns/${encodeURIComponent(campaignId)}/leads?api_key=${encodeURIComponent(this.apiKey)}`,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lead_list: leads.map((lead) => ({ email: lead.email, first_name: lead.firstName, last_name: lead.lastName, company_name: lead.companyName, custom_fields: lead.customFields })),
+        settings: { ignore_duplicate_leads_in_other_campaign: false, return_lead_ids: true },
+      }),
+    })
+    return { provider: 'smartlead', campaignId, enrolled: value.added_count ?? 0, skipped: value.skipped_count ?? 0 }
+  }
+}
+
+export class InstantlyClient extends BearerProvider implements SequencerClient {
+  readonly info = { id: 'instantly', kind: 'sequencer' as const, capabilities: ['enroll_sequence', 'test_connection'] as const }
+  async testConnection(): Promise<ConnectionHealth> {
+    await requestJson(this.http, { method: 'GET', url: 'https://api.instantly.ai/api/v2/campaigns?limit=1', headers: this.headers() })
+    return { ok: true, provider: 'instantly', accountRef: null, detail: 'Instantly API reachable' }
+  }
+  async enroll(campaignId: string, leads: SequenceLead[]): Promise<SequenceEnrollmentReceipt> {
+    if (!campaignId.trim()) throw new Error('Instantly campaignId is required')
+    const value = await requestJson<{ uploaded?: number; skipped?: number; leads?: unknown[] }>(this.http, {
+      method: 'POST', url: 'https://api.instantly.ai/api/v2/leads/add',
+      headers: { ...this.headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaign_id: campaignId, leads: leads.map((lead) => ({ email: lead.email, first_name: lead.firstName, last_name: lead.lastName, company_name: lead.companyName, custom_variables: lead.customFields })) }),
+    })
+    return { provider: 'instantly', campaignId, enrolled: value.uploaded ?? value.leads?.length ?? leads.length, skipped: value.skipped ?? 0 }
+  }
+}
+
+export class LinkedInAdsClient extends BearerProvider implements AudienceSyncClient {
+  readonly info = { id: 'linkedin-ads', kind: 'ads' as const, capabilities: ['sync_audience', 'test_connection'] as const }
+  constructor(accessToken: string, http: HttpTransport, private readonly version = '202606') { super(accessToken, http) }
+  private linkedInHeaders(): Record<string, string> {
+    return { ...this.headers(), 'Content-Type': 'application/json', 'Linkedin-Version': this.version, 'X-Restli-Protocol-Version': '2.0.0' }
+  }
+  async testConnection(): Promise<ConnectionHealth> {
+    await requestJson(this.http, { method: 'GET', url: 'https://api.linkedin.com/rest/adAccounts?q=search&search=(status:(values:List(ACTIVE)))&pageSize=1', headers: this.linkedInHeaders() })
+    return { ok: true, provider: 'linkedin-ads', accountRef: null, detail: 'LinkedIn Marketing API reachable' }
+  }
+  async syncEmails(audienceId: string, add: string[], remove: string[]): Promise<AudienceSyncReceipt> {
+    if (!/^\d+$/.test(audienceId)) throw new Error('LinkedIn audienceId must be numeric')
+    const elements = [
+      ...add.map((email) => linkedInAudienceElement('ADD', email)),
+      ...remove.map((email) => linkedInAudienceElement('REMOVE', email)),
+    ]
+    if (elements.length) await requestJson(this.http, {
+      method: 'POST', url: `https://api.linkedin.com/rest/dmpSegments/${audienceId}/users`,
+      headers: { ...this.linkedInHeaders(), 'X-RestLi-Method': 'BATCH_CREATE' },
+      body: JSON.stringify({ elements }),
+    })
+    return { provider: 'linkedin-ads', audienceId, added: add.length, removed: remove.length }
+  }
+}
+
+function linkedInAudienceElement(action: 'ADD' | 'REMOVE', email: string) {
+  const normalized = email.trim().toLowerCase()
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalized)) throw new Error(`invalid audience email: ${email}`)
+  return { action, userIds: [{ idType: 'SHA256_EMAIL', idValue: createHash('sha256').update(normalized).digest('hex') }] }
+}
+
+export type SupportedProvider = 'salesforce' | 'hubspot' | 'clay' | 'slack' | 'teams' | 'fathom' | 'smartlead' | 'instantly' | 'linkedin-ads'
 
 export function createProviderClient(
   provider: SupportedProvider,
@@ -255,6 +331,9 @@ export function createProviderClient(
     case 'fathom': return new FathomClient(credentials.apiKey
       ? { apiKey: credentials.apiKey }
       : { accessToken: required(credentials, 'accessToken') }, http)
+    case 'smartlead': return new SmartleadClient(required(credentials, 'apiKey'), http)
+    case 'instantly': return new InstantlyClient(required(credentials, 'apiKey'), http)
+    case 'linkedin-ads': return new LinkedInAdsClient(required(credentials, 'accessToken'), http, credentials.apiVersion ?? '202606')
   }
 }
 

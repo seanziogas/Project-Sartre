@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { HttpRequest, HttpTransport } from '../src/http.js'
-import { ClayClient, FathomClient, HubSpotClient, SalesforceClient, SlackClient, TeamsClient } from '../src/providers.js'
+import { ClayClient, FathomClient, HubSpotClient, InstantlyClient, LinkedInAdsClient, SalesforceClient, SlackClient, SmartleadClient, TeamsClient } from '../src/providers.js'
 
 class ScriptedHttp implements HttpTransport {
   requests: HttpRequest[] = []
@@ -21,6 +21,7 @@ describe('production provider clients (scripted HTTP)', () => {
     const hsHttp = new ScriptedHttp([{ results: [{ id: '1' }], paging: { next: { after: '2' } } }])
     const hs = new HubSpotClient({ accessToken: 'fake' }, hsHttp)
     expect(await hs.pullContacts()).toMatchObject({ connectorId: 'hubspot', object: 'contact', cursor: '2', rows: [{ id: '1' }] })
+    expect(hsHttp.requests[0]!.url).toContain('/crm/v3/objects/contacts')
   })
 
   it('calls the client-owned Clay webhook and returns only its data payload', async () => {
@@ -51,6 +52,28 @@ describe('production provider clients (scripted HTTP)', () => {
     expect(result).toMatchObject({ cursor: 'next', records: [{ externalId: '7', transcript: 'A: Hello' }] })
     expect(http.requests[0]!.url).not.toContain('fake-key')
     expect(http.requests[0]!.headers).toEqual({ 'X-Api-Key': 'fake-key' })
+  })
+
+  it('enrolls only explicitly supplied leads through Smartlead and Instantly', async () => {
+    const smartleadHttp = new ScriptedHttp([{ added_count: 1, skipped_count: 0 }])
+    const smartlead = new SmartleadClient('fake-key', smartleadHttp)
+    expect(await smartlead.enroll('campaign-1', [{ email: 'buyer@example.com', customFields: { approved: true } }]))
+      .toMatchObject({ provider: 'smartlead', campaignId: 'campaign-1', enrolled: 1 })
+    expect(smartleadHttp.requests[0]!.url).toContain('/campaigns/campaign-1/leads')
+
+    const instantlyHttp = new ScriptedHttp([{ uploaded: 1, skipped: 0 }])
+    const instantly = new InstantlyClient('fake-key', instantlyHttp)
+    expect(await instantly.enroll('campaign-2', [{ email: 'buyer@example.com' }]))
+      .toMatchObject({ provider: 'instantly', campaignId: 'campaign-2', enrolled: 1 })
+    expect(instantlyHttp.requests[0]!.headers?.Authorization).toBe('Bearer fake-key')
+  })
+
+  it('hashes audience emails before sending LinkedIn audience mutations', async () => {
+    const http = new ScriptedHttp([{}])
+    const receipt = await new LinkedInAdsClient('fake-token', http).syncEmails('10804', [' Buyer@Example.com '], [])
+    expect(receipt).toMatchObject({ added: 1, removed: 0 })
+    expect(http.requests[0]!.body).not.toContain('Buyer@Example.com')
+    expect(JSON.parse(http.requests[0]!.body!).elements[0].userIds[0].idValue).toMatch(/^[a-f0-9]{64}$/)
   })
 
   it('requires a persisted source snapshot and namespace before CRM writes', async () => {

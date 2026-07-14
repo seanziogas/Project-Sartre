@@ -170,7 +170,42 @@ export async function migrate(db: Queryable): Promise<void> {
       ON canonical_records (client_id, record_type, updated_at DESC);
     CREATE INDEX IF NOT EXISTS canonical_external_ids_idx
       ON canonical_records USING gin (external_ids);
+
+    CREATE TABLE IF NOT EXISTS runtime_artifacts (
+      client_id  text NOT NULL,
+      artifact_key text NOT NULL,
+      value jsonb NOT NULL,
+      updated_at timestamptz NOT NULL,
+      PRIMARY KEY (client_id, artifact_key)
+    );
+    CREATE INDEX IF NOT EXISTS runtime_artifacts_client_idx
+      ON runtime_artifacts (client_id, updated_at DESC);
   `)
+}
+
+/** Machine-owned per-client state such as health reports and current MVD results. */
+export class PostgresRuntimeArtifactStore {
+  constructor(private readonly db: Queryable) {}
+
+  async put(clientId: string, key: string, value: unknown, updatedAt = new Date().toISOString()): Promise<void> {
+    assertClientId(clientId)
+    if (!key.trim()) throw new Error('runtime artifact key is required')
+    await this.db.query(
+      `INSERT INTO runtime_artifacts (client_id, artifact_key, value, updated_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (client_id, artifact_key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+      [clientId, key, JSON.stringify(value), updatedAt],
+    )
+  }
+
+  async get<T>(clientId: string, key: string): Promise<T | null> {
+    assertClientId(clientId)
+    const { rows } = await this.db.query(
+      'SELECT value FROM runtime_artifacts WHERE client_id = $1 AND artifact_key = $2',
+      [clientId, key],
+    )
+    return rows.length === 0 ? null : (rows[0] as { value: T }).value
+  }
 }
 
 export interface StoredStagedBatch {

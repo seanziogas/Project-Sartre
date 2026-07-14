@@ -2,7 +2,7 @@ import 'server-only'
 import { randomUUID } from 'node:crypto'
 import { readFile, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { parseManifest } from '@sartre/core'
+import { assertApprovedConfigText, parseManifest } from '@sartre/core'
 import type { ClientManifest, FeedbackEvent } from '@sartre/core'
 import type { RunRecord } from '@sartre/pipelines'
 import type { DataHealthReport } from '@sartre/data'
@@ -11,6 +11,17 @@ import type { ConnectionHealth, ToolConnectionEvent, ToolConnectionSummary } fro
 import { getOpsDatabase } from './postgres'
 import { logOpsEvent, safeOperationalMessage } from './operational-log'
 import type { PendingGate } from './run-data'
+import {
+  buildLearningControlCenter,
+  createConfigRelease,
+  decideGovernanceRequest,
+  decidePromotion,
+  evaluateSlos,
+  GovernancePolicy,
+  GovernanceRequest,
+  requestPromotion,
+} from '@sartre/operations'
+import type { ConfigStage, GovernancePolicy as GovernancePolicyType, GovernanceRequest as GovernanceRequestType } from '@sartre/operations'
 
 /**
  * Ops-surface data layer. Every read is client-scoped — this module is the
@@ -56,9 +67,19 @@ export async function listClients(): Promise<ClientSummary[]> {
 export async function getManifest(clientId: string): Promise<ClientManifest | null> {
   if (clientId.includes('/') || clientId.includes('..')) return null // path safety
   try {
-    const manifest = parseManifest(await readFile(join(CLIENTS_DIR, clientId, 'client.yaml'), 'utf8'))
+    let productionManifest: string | undefined
+    let database: Awaited<ReturnType<typeof getOpsDatabase>> | undefined
     try {
-      const runtimeMvd = await (await getOpsDatabase()).artifacts.get<ClientManifest['mvd']>(clientId, 'mvd')
+      database = await getOpsDatabase()
+      const production = (await database.configReleases.list(clientId)).find((release) => release.stage === 'production' && release.status === 'active')
+      productionManifest = production?.files['client.yaml']
+    } catch {
+      // File-backed development mode remains readable before database setup.
+    }
+    let manifest = parseManifest(productionManifest ?? await readFile(join(CLIENTS_DIR, clientId, 'client.yaml'), 'utf8'))
+    try {
+      database ??= await getOpsDatabase()
+      const runtimeMvd = await database.artifacts.get<ClientManifest['mvd']>(clientId, 'mvd')
       if (runtimeMvd) manifest.mvd = runtimeMvd
     } catch {
       // The manifest remains readable during initial DB setup or a transient DB outage.
@@ -254,4 +275,95 @@ export function budgetUsage(manifest: ClientManifest, runs: RunRecord[]): {
     creditCap: manifest.budgets.clay_credits_monthly,
     tokenCapUsd: manifest.budgets.token_budget_monthly_usd,
   }
+}
+
+export async function getOperationsDashboard(clientId: string) {
+  return evaluateSlos(await listRuns(clientId))
+}
+
+export async function getGovernance(clientId: string) {
+  const database = await getOpsDatabase()
+  return {
+    policy: await database.governance.getPolicy(clientId),
+    requests: await database.governance.listRequests(clientId),
+    portabilityEvents: await database.portability.listAudit(clientId),
+  }
+}
+
+export async function saveGovernancePolicy(clientId: string, value: unknown, actor: string): Promise<void> {
+  const policy = GovernancePolicy.parse({ ...(value as object), clientId, updatedAt: new Date().toISOString(), updatedBy: actor })
+  await (await getOpsDatabase()).governance.putPolicy(policy)
+}
+
+export async function createGovernanceRequest(
+  clientId: string,
+  kind: GovernanceRequestType['kind'],
+  scope: GovernanceRequestType['scope'],
+  reason: string,
+  actor: string,
+): Promise<GovernanceRequestType> {
+  const request = GovernanceRequest.parse({
+    requestId: randomUUID(), clientId, kind, scope, reason, status: 'pending', requestedBy: actor, requestedAt: new Date().toISOString(),
+    decidedBy: null, decidedAt: null, executedBy: null, executedAt: null,
+  })
+  await (await getOpsDatabase()).governance.putRequest(request)
+  return request
+}
+
+export async function resolveGovernanceRequest(clientId: string, requestId: string, decision: 'approved' | 'rejected', actor: string): Promise<void> {
+  const store = (await getOpsDatabase()).governance
+  const request = await store.getRequest(clientId, requestId)
+  if (!request) throw new Error('governance request not found')
+  await store.putRequest(decideGovernanceRequest(request, decision, actor, new Date().toISOString()))
+}
+
+export async function listConfigReleases(clientId: string) {
+  return (await getOpsDatabase()).configReleases.list(clientId)
+}
+
+export async function captureConfigRelease(clientId: string, actor: string) {
+  const store = (await getOpsDatabase()).configReleases
+  const files = await readReleaseFiles(clientId)
+  parseManifest(files['client.yaml']!)
+  if (files['brain/config/standard-runtime.yaml']) assertApprovedConfigText(files['brain/config/standard-runtime.yaml'], `${clientId}/brain/config/standard-runtime.yaml`)
+  const release = createConfigRelease(clientId, await store.nextVersion(clientId), files, actor)
+  await store.put(release)
+  return release
+}
+
+export async function requestConfigPromotion(clientId: string, releaseId: string, target: ConfigStage, actor: string): Promise<void> {
+  const store = (await getOpsDatabase()).configReleases
+  const release = await store.get(clientId, releaseId)
+  if (!release) throw new Error('configuration release not found')
+  await store.put(requestPromotion(release, target, actor))
+}
+
+export async function resolveConfigPromotion(clientId: string, releaseId: string, decision: 'approved' | 'rejected', actor: string): Promise<void> {
+  const store = (await getOpsDatabase()).configReleases
+  const release = await store.get(clientId, releaseId)
+  if (!release) throw new Error('configuration release not found')
+  await store.put(decidePromotion(release, decision, actor))
+}
+
+export async function getLearningControlCenter(clientId: string) {
+  const database = await getOpsDatabase()
+  return buildLearningControlCenter(
+    await database.evaluations.list(clientId),
+    await database.artifacts.listPrefix(clientId, 'learning:'),
+  )
+}
+
+async function readReleaseFiles(clientId: string): Promise<Record<string, string>> {
+  if (clientId.includes('/') || clientId.includes('..')) throw new Error('invalid client id')
+  const root = join(CLIENTS_DIR, clientId)
+  const files: Record<string, string> = { 'client.yaml': await readFile(join(root, 'client.yaml'), 'utf8') }
+  const configRoot = join(root, 'brain', 'config')
+  try {
+    for (const entry of await readdir(configRoot, { withFileTypes: true })) {
+      if (entry.isFile() && !entry.name.startsWith('.')) files[`brain/config/${entry.name}`] = await readFile(join(configRoot, entry.name), 'utf8')
+    }
+  } catch {
+    // A client with manifest-only configuration is still releasable.
+  }
+  return files
 }

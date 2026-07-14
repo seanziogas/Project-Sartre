@@ -54,6 +54,11 @@ export interface RunnerDeps {
   onOperationalEvent?: (event: RunnerOperationalEvent) => void
   scheduleClaims?: { claim(clientId: string, moduleId: string, minuteSlot: string): Promise<boolean> }
   effects?: { execute<T>(clientId: string, idempotencyKey: string, payload: unknown, perform: () => Promise<T>): Promise<T> }
+  telemetry?: {
+    span<T>(name: string, attributes: Record<string, string | number | boolean>, operation: () => Promise<T>): Promise<T>
+    counter(name: string, value: number, attributes?: Record<string, string | number | boolean>): Promise<void>
+    gauge(name: string, value: number, attributes?: Record<string, string | number | boolean>): Promise<void>
+  }
 }
 
 export interface RunnerOperationalEvent {
@@ -78,10 +83,17 @@ export class Runner {
     this.engine = deps.engine ?? new PipelineEngine(deps.store, {
       now: this.now,
       ...(deps.effects ? { effects: deps.effects } : {}),
+      ...(deps.telemetry ? { telemetry: deps.telemetry } : {}),
     })
   }
 
   async tick(): Promise<TickReport> {
+    return this.deps.telemetry
+      ? this.deps.telemetry.span('runner.tick', {}, () => this.tickInternal())
+      : this.tickInternal()
+  }
+
+  private async tickInternal(): Promise<TickReport> {
     const report: TickReport = { resumed: [], scheduled: [], warnings: [] }
     const warn = (m: string, event: RunnerOperationalEvent) => {
       report.warnings.push(m)
@@ -147,6 +159,11 @@ export class Runner {
       }
     }
 
+    if (this.deps.telemetry) await Promise.all([
+      this.deps.telemetry.counter('sartre.runner.scheduled', report.scheduled.length),
+      this.deps.telemetry.counter('sartre.runner.resumed', report.resumed.length),
+      this.deps.telemetry.gauge('sartre.runner.warnings', report.warnings.length),
+    ])
     return report
   }
 

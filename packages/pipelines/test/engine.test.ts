@@ -68,6 +68,18 @@ describe('PipelineEngine', () => {
     }])
   })
 
+  it('traces each pipeline step with tenant and run attributes', async () => {
+    const spans: Array<{ name: string; attributes: Record<string, string | number | boolean> }> = []
+    const engine = new PipelineEngine(new MemoryRunStore(), {
+      now: NOW, runId: 'trace-r1',
+      telemetry: { span: async (name, attributes, operation) => { spans.push({ name, attributes }); return operation() } },
+    })
+    await engine.start(pipeline([{ id: 'prepare', run: async () => 'ok' }]), manifestWith(() => {}), 'Acme')
+    expect(spans).toEqual([{ name: 'pipeline.step', attributes: {
+      'sartre.client_id': 'Acme', 'sartre.run_id': 'trace-r1', 'sartre.pipeline_id': 'test-pipeline@0.1.0', 'sartre.step_id': 'prepare',
+    } }])
+  })
+
   it('never starts a run whose module fails the MVD gate', async () => {
     const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW })
     const manifest = manifestWith((m) => {

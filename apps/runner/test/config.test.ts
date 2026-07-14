@@ -17,4 +17,12 @@ describe('runner environment validation', () => {
       credentialKeys: { currentKeyId: 'current', keys: { current: key } },
     })
   })
+
+  it('parses optional OTLP collector configuration without exposing headers elsewhere', () => {
+    expect(loadRunnerConfig({
+      DATABASE_URL: 'x', OTEL_EXPORTER_OTLP_ENDPOINT: 'https://collector.example.com',
+      OTEL_EXPORTER_OTLP_HEADERS: JSON.stringify({ Authorization: 'Bearer fake-test-token' }),
+    })).toMatchObject({ otlpEndpoint: 'https://collector.example.com', otlpHeaders: { Authorization: 'Bearer fake-test-token' } })
+    expect(() => loadRunnerConfig({ DATABASE_URL: 'x', OTEL_EXPORTER_OTLP_HEADERS: 'not-json' })).toThrow()
+  })
 })

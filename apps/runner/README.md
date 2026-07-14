@@ -9,6 +9,7 @@ Required environment:
 - `SARTRE_CLIENTS_DIR` — optional client-instance path; defaults to `clients/`.
 - `SARTRE_TICK_MS` — optional polling interval; defaults to 30 seconds.
 - `SARTRE_HEALTH_PORT` — optional liveness/readiness port; defaults to `3001`. `GET /healthz` reports process liveness. `GET /readyz` becomes ready after a successful runner tick, becomes unavailable after a later tick/database failure, and recovers after the next successful tick.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — optional OTLP/HTTP collector base URL. `OTEL_EXPORTER_OTLP_HEADERS` is an optional JSON string map for deployment-owned authentication headers.
 
 Connection environment:
 
@@ -26,6 +27,20 @@ Run `npm run simulate` for a read-only deployment preview. It loads active manif
 After making a new key ID current, run `npm run rotate-credentials`. Rotation requires the versioned keyring, rewraps only envelopes not using the current key, records an audit event per connection, and prints only the number rotated. Keep every referenced old key available until the command succeeds.
 
 Postgres migrations enable and force tenant RLS. Use a non-owner application role without `BYPASSRLS`; the data adapters scope every tenant query transaction with `sartre.client_id`, and only explicit runner-wide operations use `sartre.system_access`.
+
+Operational commands:
+
+```sh
+npm run record-eval -- Acme list-grader 1.2.0 24 0 live "production fixture pass"
+npm run governance-request -- Acme export requester@example.com "annual backup" runs brain configuration
+npm run governance-decide -- Acme REQUEST_ID approved approver@example.com
+npm run governance -- execute Acme REQUEST_ID operator@example.com
+npm run restore-tenant -- portability-exports/Acme.json RESTORE_REQUEST_ID operator@example.com
+```
+
+Portable exports are credential-free but still contain client data. They are written create-only with owner-only permissions and must be moved to approved encrypted storage. Restore validates the checksum and manifest, refuses existing files/data, and never restores connector credentials.
+
+Configuration releases are captured and promoted from the portal. Promotion is ordered development → staging → production and requires a second actor. Once production exists, the runner reads the immutable promoted manifest and standard runtime; it does not silently fall back to a newer working file.
 
 Runner lifecycle, readiness transitions, tick outcomes, invalid schedules, and runs that cannot resume are emitted as newline-delimited JSON operational events. The ops app emits the same format for connector-test success/failure; failed tests are also appended to the tenant’s connection audit history.
 

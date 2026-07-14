@@ -1,15 +1,17 @@
 import type { ZodType } from 'zod'
+import { randomUUID } from 'node:crypto'
 import type {
   AudienceSyncClient, CachedField, CrmReader, CrmWriter, InboundReader, IntentReader, LeadConverter,
   NamespacedWrite, SequenceLead, SequencerClient, StagedBatch, WarehouseClient,
 } from '@sartre/connectors'
 import { EnrichmentCache, IntentEvent } from '@sartre/connectors'
+import { parseApprovedConfigText } from '@sartre/core'
 import type { Account, Contact, MvdStatus, Signal } from '@sartre/core'
 import { CanonicalIngestionCoordinator } from '@sartre/data'
 import type { DataHealthReport, LeadCandidate } from '@sartre/data'
 import {
   PostgresCacheStore, PostgresCanonicalStore, PostgresFeedbackLog, PostgresRuntimeArtifactStore,
-  PostgresStagingStore,
+  PostgresStagingStore, PostgresConfigReleaseStore, PostgresEvaluationRunStore,
 } from '@sartre/db'
 import type {
   AbmInput, AccountPlay, AudienceMutation, CopyFactoryInput, Digest, DispatchReceipt, EtlChange,
@@ -38,8 +40,16 @@ export function createStandardModuleDeps(context: RunnerDeploymentContext): Runn
   const feedback = new PostgresFeedbackLog(context.db)
   const staging = new PostgresStagingStore(context.db)
   const cache = new EnrichmentCache(new PostgresCacheStore(context.db))
+  const releases = new PostgresConfigReleaseStore(context.db)
+  const evaluations = new PostgresEvaluationRunStore(context.db)
 
-  const config = (clientId: string) => context.brains.loadApprovedConfig(clientId, 'standard-runtime.yaml', StandardRuntimeConfigSchema)
+  const config = async (clientId: string) => {
+    const production = (await releases.list(clientId)).find((release) => release.stage === 'production' && release.status === 'active')
+    const promoted = production?.files['brain/config/standard-runtime.yaml']
+    return promoted
+      ? parseApprovedConfigText(promoted, `${clientId} production release v${production.version}/standard-runtime.yaml`, StandardRuntimeConfigSchema)
+      : context.brains.loadApprovedConfig(clientId, 'standard-runtime.yaml', StandardRuntimeConfigSchema)
+  }
   const input = async <T>(clientId: string, moduleId: string, schema: ZodType<T>): Promise<T> => {
     const value = await artifacts.get<unknown>(clientId, `standard-input:${moduleId}`)
     if (value === null) throw new Error(`${moduleId} requires tenant runtime artifact standard-input:${moduleId}`)
@@ -197,8 +207,8 @@ export function createStandardModuleDeps(context: RunnerDeploymentContext): Runn
       return { sourceSystem: cfg.provider, loadDeanonInput: async (id) => ({ events: (await collectStaged(source, 'pullSignals')).rows.map((row) => IntentEvent.parse({ clientId: id, sourceSystem: cfg.provider, externalId: String(row[cfg.idField] ?? ''), companyDomain: row[cfg.domainField] ?? null, companyName: null, kind: String(row[cfg.kindField] ?? 'intent'), occurredAt: String(row[cfg.occurredAtField] ?? new Date().toISOString()), detail: String(row[cfg.detailField] ?? '') })), accounts: await canonical.listAll(id, 'account') as Account[] }), persistSignals: async (id, signals) => (await canonical.putSignals(id, signals)).length }
     },
     learning: async (clientId) => ({
-      loadFeedback: (id) => feedback.list(id), evaluateProposal: async (_id, proposal) => evaluateTuningProposal(proposal),
-      loadOptimizationInput: (id) => input(id, 'platform.learning', StandardInputSchemas['platform.learning'] as ZodType<OptimizationInput>), evaluateOptimizationDraft: async (_id, draft) => evaluateOptimizationDraft(draft),
+      loadFeedback: (id) => feedback.list(id), evaluateProposal: async (id, proposal) => recordEvaluation(id, 'learning-tuning', evaluateTuningProposal(proposal)),
+      loadOptimizationInput: (id) => input(id, 'platform.learning', StandardInputSchemas['platform.learning'] as ZodType<OptimizationInput>), evaluateOptimizationDraft: async (id, draft) => recordEvaluation(id, 'learning-optimization', evaluateOptimizationDraft(draft)),
       persistDrafts: async (id, drafts) => (await publish(id, 'platform.learning', drafts)).affected,
     }),
     quality: async () => ({ loadReports: async (id) => ({ current: required(await artifacts.get<DataHealthReport>(id, 'health-report'), 'health-report'), previous: await artifacts.get<DataHealthReport>(id, 'previous-health-report') }), saveMvd: (id, mvd) => artifacts.put(id, 'mvd', mvd), notify }),
@@ -218,6 +228,14 @@ export function createStandardModuleDeps(context: RunnerDeploymentContext): Runn
     signals: async (clientId) => { const cfg = moduleConfig(await config(clientId), 'platform.signals', StandardModuleConfigSchemas['platform.signals']); return { loadSignals: (id) => input(id, 'platform.signals', StandardInputSchemas['platform.signals']), rules: cfg.rules, persistTriggers: (id, matches) => publish(id, 'platform.signals', matches) } },
     digests: async () => ({ loadDigest: (id) => input(id, 'platform.digests', StandardInputSchemas['platform.digests']), deliver: async (id, digest) => { await notify(id, digest.title, digest.markdown); return { affected: 1 } } }),
     metrics: async (clientId) => ({ loadMetrics: (id) => input(id, 'platform.metrics', StandardInputSchemas['platform.metrics']), tokenUsdPerReport: cost(await config(clientId), 'metricsReportUsd', 0.08), publish: async (id, report) => { const receipt = await publish(id, 'platform.metrics', report); await notify(id, report.title, report.markdown); return receipt } }),
+  }
+
+  async function recordEvaluation(clientId: string, skillId: string, result: { pass: boolean; detail: string }) {
+    await evaluations.append({
+      evaluationId: randomUUID(), clientId, skillId, version: 'structural-v1', status: result.pass ? 'passed' : 'failed',
+      passed: result.pass ? 1 : 0, failed: result.pass ? 0 : 1, detail: result.detail, source: 'learning', createdAt: new Date().toISOString(),
+    })
+    return result
   }
 }
 

@@ -41,6 +41,7 @@ export interface EngineOptions {
   /** Layer 8 capture: gate resolutions become feedback events. */
   onFeedbackEvent?: (event: HumanActionEvent) => void | Promise<void>
   effects?: { execute<T>(clientId: string, idempotencyKey: string, payload: unknown, perform: () => Promise<T>): Promise<T> }
+  telemetry?: { span<T>(name: string, attributes: Record<string, string | number | boolean>, operation: () => Promise<T>): Promise<T> }
 }
 
 export class PipelineEngine {
@@ -181,13 +182,18 @@ export class PipelineEngine {
       this.journal(run, step.id, 'step_started', '')
       const ctx = this.stepContext(run, manifest, step.id, perRun)
       try {
-        const output = step.effect && this.options.effects
-          ? await this.options.effects.execute(run.clientId, `${run.runId}:${step.id}`, {
-              pipelineId: run.pipelineId,
-              stepId: step.id,
-              inputs: { ...ctx.outputs },
-            }, () => step.run(ctx))
-          : await step.run(ctx)
+        const perform = () => step.effect && this.options.effects
+          ? this.options.effects.execute(run.clientId, `${run.runId}:${step.id}`, {
+            pipelineId: run.pipelineId,
+            stepId: step.id,
+            inputs: { ...ctx.outputs },
+          }, () => step.run(ctx))
+          : step.run(ctx)
+        const output = this.options.telemetry
+          ? await this.options.telemetry.span('pipeline.step', {
+            'sartre.client_id': run.clientId, 'sartre.run_id': run.runId, 'sartre.pipeline_id': run.pipelineId, 'sartre.step_id': step.id,
+          }, perform)
+          : await perform()
         run.checkpoints[step.id] = output
         this.journal(run, step.id, 'step_completed', '')
         await this.store.save(run)

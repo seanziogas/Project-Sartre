@@ -20,3 +20,12 @@ Both apps run the idempotent `@sartre/db` migration at startup. The ops app reco
 Authentication fails closed. Client grants are tenant-specific; `client_viewer` is read-only, `client_approver` may decide operational gates, and only `gtme`/`internal_admin` may decide `brain_change`. Reviewer attribution comes from the verified identity, never a form field. Subscription status is checked before approvals, copilot requests, new runs, and resumed runs.
 
 Connections are optional and tenant-owned. Authorized operators can use API credentials or OAuth apps owned by their client, test and rotate credentials, and inspect an append-only activity trail. Secrets are encrypted with tenant-bound authenticated encryption, never returned after submission, and destroyed on revoke.
+
+Additional client tabs provide:
+
+- Operations: current SLO status derived from durable runs.
+- Learning: review metrics, draft proposals, and evaluation regressions.
+- Releases: immutable configuration capture and two-person environment promotion.
+- Governance: residency/retention policy, lifecycle requests, decisions, and portability audit history.
+
+Approving a governance request does not execute it. Execution remains an explicit runner-side operator command. Client approvers can view these controls; only internal admins and GTMEs can manage them.

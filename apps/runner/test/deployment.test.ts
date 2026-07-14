@@ -3,8 +3,9 @@ import { loadModuleDeps } from '../src/deployment.js'
 import { buildRegistry } from '../src/registry.js'
 
 describe('runner deployment loading', () => {
+  const db = { query: async () => ({ rows: [] }) }
   it('starts with the first-party 23-module deployment bundle when no override is configured', async () => {
-    const deps = await loadModuleDeps(undefined, { db: {}, brains: {}, connections: {}, tools: {} } as never)
+    const deps = await loadModuleDeps(undefined, { db, brains: {}, connections: {}, tools: {} } as never)
     const registry = buildRegistry(deps, { complete: async () => '[]' })
     expect(registry.forModule('platform.learning')?.id).toBe('learning-loop@0.1.0')
     expect(Object.values(deps)).toHaveLength(23)
@@ -32,7 +33,7 @@ describe('runner deployment loading', () => {
     }
     const tool = new Proxy({}, { get: () => async () => ({}) })
     const deps = await loadModuleDeps(undefined, {
-      db: {}, connections: {}, brains: { loadApprovedConfig: async () => runtime, loadContext: async () => 'approved brain' }, tools: tool,
+      db, connections: {}, brains: { loadApprovedConfig: async () => runtime, loadContext: async () => 'approved brain' }, tools: tool,
     } as never)
     for (const resolver of Object.values(deps)) await expect(resolver('Acme')).resolves.toBeTruthy()
   })
@@ -40,7 +41,7 @@ describe('runner deployment loading', () => {
   it('binds reviewed event delivery to the tenant email connection', async () => {
     const sent: unknown[] = []
     const deps = await loadModuleDeps(undefined, {
-      db: {}, connections: {},
+      db, connections: {},
       brains: { loadApprovedConfig: async () => ({ connections: { email: 'gmail' }, destinations: {}, costs: {}, modules: {} }) },
       tools: { email: async (_clientId: string, provider: string) => ({
         sendEmail: async (message: unknown) => { sent.push({ provider, message }); return { provider, messageId: 'm1' } },
@@ -52,6 +53,27 @@ describe('runner deployment loading', () => {
     expect(sent).toEqual([{ provider: 'gmail', message: { to: ['buyer@example.com'], subject: 'Following up on Summit', text: 'Thanks for joining.' } }])
   })
 
+  it('uses the latest human-promoted production runtime instead of mutable working files', async () => {
+    const production = {
+      releaseId: 'bc51cff5-917a-4bd5-8db6-5a46ddc1841c', clientId: 'Acme', version: 2, digest: 'a'.repeat(64),
+      files: { 'brain/config/standard-runtime.yaml': [
+        'version: 1', 'status: active', 'updated: 2026-07-14', 'approved_by: approver@kiln.example', 'config:',
+        '  connections: { email: gmail }', '  destinations: {}', '  costs: {}', '  modules: {}',
+      ].join('\n') },
+      stage: 'production', status: 'active', targetStage: null, createdBy: 'creator', createdAt: '2026-07-14T12:00:00Z',
+      requestedBy: 'requester', requestedAt: '2026-07-14T12:10:00Z', decidedBy: 'approver', decidedAt: '2026-07-14T12:20:00Z',
+    }
+    const sent: unknown[] = []
+    const deps = await loadModuleDeps(undefined, {
+      db: { query: async (sql: string) => ({ rows: sql.includes('config_releases') ? [{ doc: production }] : [] }) }, connections: {},
+      brains: { loadApprovedConfig: async () => { throw new Error('working file must not load') } },
+      tools: { email: async () => ({ sendEmail: async (message: unknown) => { sent.push(message); return { provider: 'gmail', messageId: 'm1' } } }) },
+    } as never)
+    const events = await deps.events('Acme')
+    await events.send('Acme', [{ attendeeId: 'a1', email: 'buyer@example.com', event: 'Summit', play: 'attendee', draft: 'Hello' }])
+    expect(sent).toHaveLength(1)
+  })
+
   it('collects every inbound cursor page before routing', async () => {
     const cursors: Array<string | undefined> = []
     const runtime = {
@@ -60,7 +82,7 @@ describe('runner deployment loading', () => {
       },
     }
     const deps = await loadModuleDeps(undefined, {
-      db: {}, connections: {}, brains: { loadApprovedConfig: async () => runtime },
+      db, connections: {}, brains: { loadApprovedConfig: async () => runtime },
       tools: {
         inbound: async () => ({ pullLeads: async (cursor?: string) => {
           cursors.push(cursor)

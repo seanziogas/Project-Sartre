@@ -9,3 +9,4 @@ dist/
 .sartre-data/
 next-env.d.ts
 shadow-runs/
+portability-exports/

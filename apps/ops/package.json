@@ -14,6 +14,7 @@
     "@sartre/data": "*",
     "@sartre/db": "*",
     "@sartre/learning": "*",
+    "@sartre/operations": "*",
     "@sartre/pipelines": "*",
     "@sartre/skills": "*",
     "next": "^15.4.0",

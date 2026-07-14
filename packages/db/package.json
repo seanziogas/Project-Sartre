@@ -14,6 +14,7 @@
     "@sartre/connectors": "*",
     "@sartre/core": "*",
     "@sartre/data": "*",
+    "@sartre/operations": "*",
     "@sartre/pipelines": "*",
     "pg": "^8.22.0"
   },

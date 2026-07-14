@@ -69,19 +69,7 @@ export class FileClientBrainStore {
     } catch (error) {
       throw new ClientBrainError(`${clientId}/brain/${brainPath} unreadable: ${(error as Error).message}`)
     }
-    const envelope = ConfigEnvelope.safeParse(raw)
-    if (!envelope.success) {
-      throw new ClientBrainError(`${clientId}/brain/${brainPath} has an invalid config envelope`)
-    }
-    if (envelope.data.status !== 'active' || envelope.data.approved_by.trim() === '') {
-      throw new ClientBrainError(`${clientId}/brain/${brainPath} is not active and human-approved`)
-    }
-    const config = schema.safeParse(envelope.data.config)
-    if (!config.success) {
-      const issues = config.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
-      throw new ClientBrainError(`${clientId}/brain/${brainPath} config failed validation: ${issues.join('; ')}`)
-    }
-    return config.data
+    return parseApprovedConfig(raw, `${clientId}/brain/${brainPath}`, schema)
   }
 
   private async safePath(clientId: string, brainPath: string, subdirectory = ''): Promise<string> {
@@ -113,6 +101,32 @@ export class FileClientBrainStore {
       throw new ClientBrainError(`${clientId}/brain/${subdirectory ? `${subdirectory}/` : ''}${brainPath} unreadable: ${(error as Error).message}`)
     }
   }
+}
+
+export function parseApprovedConfig<T>(raw: unknown, label: string, schema: z.ZodType<T>): T {
+    const envelope = ConfigEnvelope.safeParse(raw)
+    if (!envelope.success) {
+      throw new ClientBrainError(`${label} has an invalid config envelope`)
+    }
+    if (envelope.data.status !== 'active' || envelope.data.approved_by.trim() === '') {
+      throw new ClientBrainError(`${label} is not active and human-approved`)
+    }
+    const config = schema.safeParse(envelope.data.config)
+    if (!config.success) {
+      const issues = config.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+      throw new ClientBrainError(`${label} config failed validation: ${issues.join('; ')}`)
+    }
+    return config.data
+}
+
+export function parseApprovedConfigText<T>(text: string, label: string, schema: z.ZodType<T>): T {
+  let raw: unknown
+  try { raw = parseYaml(text) } catch (error) { throw new ClientBrainError(`${label} unreadable: ${(error as Error).message}`) }
+  return parseApprovedConfig(raw, label, schema)
+}
+
+export function assertApprovedConfigText(text: string, label: string): void {
+  parseApprovedConfigText(text, label, z.unknown())
 }
 
 function isWithin(root: string, candidate: string): boolean {

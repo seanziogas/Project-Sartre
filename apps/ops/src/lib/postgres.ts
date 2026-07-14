@@ -3,6 +3,10 @@ import {
   createPostgresConnection,
   migrate,
   PostgresFeedbackLog,
+  PostgresConfigReleaseStore,
+  PostgresEvaluationRunStore,
+  PostgresGovernanceStore,
+  PostgresPortabilityStore,
   PostgresRunStore,
   PostgresRuntimeArtifactStore,
   PostgresToolConnectionStore,
@@ -15,6 +19,10 @@ interface OpsDatabase {
   connections: PostgresToolConnectionStore
   connectionEvents: PostgresToolConnectionEventStore
   artifacts: PostgresRuntimeArtifactStore
+  governance: PostgresGovernanceStore
+  configReleases: PostgresConfigReleaseStore
+  evaluations: PostgresEvaluationRunStore
+  portability: PostgresPortabilityStore
   health(): Promise<void>
 }
 
@@ -38,6 +46,10 @@ async function initialize(): Promise<OpsDatabase> {
       connections: new PostgresToolConnectionStore(connection),
       connectionEvents: new PostgresToolConnectionEventStore(connection),
       artifacts: new PostgresRuntimeArtifactStore(connection),
+      governance: new PostgresGovernanceStore(connection),
+      configReleases: new PostgresConfigReleaseStore(connection),
+      evaluations: new PostgresEvaluationRunStore(connection),
+      portability: new PostgresPortabilityStore(connection),
       health: async () => { await connection.query('SELECT 1') },
     }
   } catch (error) {

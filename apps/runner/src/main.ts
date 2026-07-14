@@ -1,8 +1,9 @@
 import { resolve } from 'node:path'
-import { FileClientBrainStore, loadManifestsFromDir } from '@sartre/core'
-import { createPostgresConnection, migrate, PostgresEffectLedger, PostgresRunStore, PostgresRuntimeArtifactStore, PostgresScheduleClaimStore, PostgresToolConnectionStore } from '@sartre/db'
+import { FileClientBrainStore, loadManifestsFromDir, parseManifest } from '@sartre/core'
+import { createPostgresConnection, migrate, PostgresConfigReleaseStore, PostgresEffectLedger, PostgresRunStore, PostgresRuntimeArtifactStore, PostgresScheduleClaimStore, PostgresToolConnectionStore } from '@sartre/db'
 import { Runner } from '@sartre/pipelines'
 import { AnthropicLlmClient } from '@sartre/skills'
+import { HttpOtlpTransport, NoopTelemetry, OtlpTelemetry, ResilientTelemetry } from '@sartre/operations'
 import { loadModuleDeps } from './deployment.js'
 import { buildRegistry } from './registry.js'
 import { TenantConnectionResolver } from './connections.js'
@@ -30,6 +31,7 @@ const connections = new TenantConnectionResolver(
 )
 const tools = new TenantToolClients(connection, connections)
 const artifacts = new PostgresRuntimeArtifactStore(connection)
+const configReleases = new PostgresConfigReleaseStore(connection)
 const moduleDeps = await initializeModuleDeps()
 
 async function initializeModuleDeps() {
@@ -43,6 +45,12 @@ async function initializeModuleDeps() {
 }
 
 const log = createOperationalLogger()
+const telemetry = config.otlpEndpoint
+  ? new ResilientTelemetry(
+    new OtlpTelemetry(new HttpOtlpTransport(config.otlpEndpoint, config.otlpHeaders), 'sartre-runner'),
+    (error) => log('warn', 'telemetry_export_failed', { message: error.message }),
+  )
+  : new NoopTelemetry()
 const readiness = new ReadinessState()
 let consecutiveTickFailures = 0
 
@@ -65,11 +73,22 @@ const runner = new Runner({
   registry: buildRegistry(moduleDeps, llm),
   manifests: async () => {
     const { manifests, problems } = await loadManifestsFromDir(config.clientsDir)
+    const unresolvedProblems: typeof problems = []
+    for (const problem of problems) {
+      const production = (await configReleases.list(problem.clientId)).find((release) => release.stage === 'production' && release.status === 'active')
+      if (production?.files['client.yaml']) {
+        manifests.set(problem.clientId, parseManifest(production.files['client.yaml']))
+      } else {
+        unresolvedProblems.push(problem)
+      }
+    }
     await Promise.all([...manifests].map(async ([clientId, manifest]) => {
+      const production = (await configReleases.list(clientId)).find((release) => release.stage === 'production' && release.status === 'active')
+      if (production?.files['client.yaml']) manifests.set(clientId, parseManifest(production.files['client.yaml']))
       const runtimeMvd = await artifacts.get<typeof manifest.mvd>(clientId, 'mvd')
-      if (runtimeMvd) manifest.mvd = runtimeMvd
+      if (runtimeMvd) manifests.get(clientId)!.mvd = runtimeMvd
     }))
-    for (const p of problems) log('warn', 'manifest_invalid', { clientId: p.clientId, message: p.error })
+    for (const p of unresolvedProblems) log('warn', 'manifest_invalid', { clientId: p.clientId, message: p.error })
     return manifests
   },
   onOperationalEvent: ({ event, fields }) => log('warn', event, fields),
@@ -77,6 +96,7 @@ const runner = new Runner({
   onTickError: recordTickFailure,
   scheduleClaims: new PostgresScheduleClaimStore(connection),
   effects: new PostgresEffectLedger(connection),
+  telemetry,
 })
 
 const healthServer = startHealthServer(config.healthPort, readiness.isReady)

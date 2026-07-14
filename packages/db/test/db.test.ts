@@ -8,6 +8,7 @@ import { EnrichmentCache } from '@sartre/connectors'
 import { CanonicalIngestionCoordinator, mapSourceRow } from '@sartre/data'
 import { PipelineEngine, Runner, MapRegistry } from '@sartre/pipelines'
 import type { PipelineDefinition } from '@sartre/pipelines'
+import { createConfigRelease } from '@sartre/operations'
 import {
   migrate,
   PostgresCacheStore,
@@ -21,6 +22,10 @@ import {
   PostgresConnectorSnapshotStore,
   PostgresEffectLedger,
   PostgresScheduleClaimStore,
+  PostgresConfigReleaseStore,
+  PostgresEvaluationRunStore,
+  PostgresGovernanceStore,
+  PostgresPortabilityStore,
 } from '../src/index.js'
 import type { Queryable, TenantQueryable } from '../src/index.js'
 
@@ -172,6 +177,59 @@ describe('PostgresRuntimeArtifactStore (against PGlite)', () => {
     } finally {
       await db.query('RESET ROLE')
     }
+  })
+
+  it('lists only the requested artifact prefix', async () => {
+    const store = new PostgresRuntimeArtifactStore(db)
+    await store.put('PrefixClient', 'learning:proposal:1', { status: 'draft' })
+    await store.put('PrefixClient', 'health-report', { score: 90 })
+    expect(await store.listPrefix('PrefixClient', 'learning:')).toMatchObject([{ key: 'learning:proposal:1', value: { status: 'draft' } }])
+  })
+})
+
+describe('operational control stores (against PGlite)', () => {
+  it('persists governance, configuration releases, and evaluation history per tenant', async () => {
+    const governance = new PostgresGovernanceStore(db)
+    const retentionDays = Object.fromEntries(['runs', 'feedback', 'connections', 'staging', 'canonical', 'artifacts', 'effects', 'configuration', 'evaluations', 'audit', 'brain'].map((key) => [key, 365])) as never
+    await governance.putPolicy({ clientId: 'Controls', retentionDays, residency: 'US', exportEnabled: true, deletionGraceDays: 30, updatedAt: '2026-07-14T12:00:00Z', updatedBy: 'admin' })
+    expect(await governance.getPolicy('Controls')).toMatchObject({ residency: 'US', exportEnabled: true })
+    expect(await governance.getPolicy('OtherControls')).toBeNull()
+
+    const releases = new PostgresConfigReleaseStore(db)
+    const release = createConfigRelease('Controls', await releases.nextVersion('Controls'), { 'client.yaml': 'status: active' }, 'admin', '2026-07-14T12:00:00Z')
+    await releases.put(release)
+    expect(await releases.list('Controls')).toMatchObject([{ version: 1, stage: 'development' }])
+
+    const evaluations = new PostgresEvaluationRunStore(db)
+    await evaluations.append({
+      evaluationId: 'bc51cff5-917a-4bd5-8db6-5a46ddc1841c', clientId: 'Controls', skillId: 'list-grader', version: '1.2.0',
+      status: 'passed', passed: 12, failed: 0, detail: 'known answers pass', source: 'learning', createdAt: '2026-07-14T12:00:00Z',
+    })
+    expect(await evaluations.list('Controls')).toMatchObject([{ skillId: 'list-grader', passed: 12 }])
+  })
+
+  it('exports no credential envelopes and restores a checksum-ready tenant dataset into an empty target', async () => {
+    const clientId = 'Portable'
+    const runs = new PostgresRunStore(db)
+    await new PipelineEngine(runs, { runId: 'portable-r1' }).start(
+      { id: 'portable@1', moduleId: 'revops.enrichment', steps: [{ id: 'done', run: async () => 'ok' }] }, manifest(), clientId,
+    )
+    const artifacts = new PostgresRuntimeArtifactStore(db)
+    await artifacts.put(clientId, 'learning:proposal:1', { status: 'draft' }, '2026-07-14T12:00:00Z')
+    const portability = new PostgresPortabilityStore(db)
+    const exported = await portability.exportRecords(clientId)
+    expect(JSON.stringify(exported)).not.toContain('encryptedCredentials')
+    expect(exported.find((item) => item.category === 'runs')?.rows).toHaveLength(1)
+
+    const governance = new PostgresGovernanceStore(db)
+    await governance.deleteBefore(clientId, 'runs', '2026-07-15T00:00:00Z')
+    await governance.deleteBefore(clientId, 'artifacts', '2026-07-15T00:00:00Z')
+    const counts = await portability.restoreRecords(clientId, exported)
+    expect(counts.runs).toBe(1)
+    expect(await runs.getScoped(clientId, 'portable-r1')).toMatchObject({ status: 'completed' })
+    expect(await artifacts.get(clientId, 'learning:proposal:1')).toEqual({ status: 'draft' })
+    await portability.clearPortableData(clientId)
+    expect(await runs.getScoped(clientId, 'portable-r1')).toBeNull()
   })
 })
 

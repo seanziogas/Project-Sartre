@@ -23,7 +23,7 @@ export const PortalAccessConfig = z.object({
 })
 export type PortalAccessConfig = z.infer<typeof PortalAccessConfig>
 
-export type PortalPermission = 'view' | 'copilot' | 'approve' | 'connect'
+export type PortalPermission = 'view' | 'copilot' | 'approve' | 'connect' | 'manage'
 
 export function roleForClient(identity: PortalIdentity, clientId: string): PortalRole | null {
   const admin = identity.grants.find((grant) => grant.role === 'internal_admin')
@@ -35,6 +35,7 @@ export function canAccessClient(identity: PortalIdentity, clientId: string, perm
   const role = roleForClient(identity, clientId)
   if (!role) return false
   if (permission === 'view' || permission === 'copilot') return true
+  if (permission === 'manage') return role === 'internal_admin' || role === 'gtme'
   return role === 'internal_admin' || role === 'gtme' || role === 'client_approver'
 }
 

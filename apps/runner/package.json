@@ -8,7 +8,12 @@
     "start": "node dist/main.js",
     "preflight": "node dist/preflight-main.js",
     "rotate-credentials": "node dist/rotate-credentials-main.js",
-    "simulate": "node dist/simulate-main.js"
+    "simulate": "node dist/simulate-main.js",
+    "governance": "node dist/governance-main.js",
+    "governance-request": "node dist/governance-request-main.js",
+    "governance-decide": "node dist/governance-decide-main.js",
+    "restore-tenant": "node dist/restore-tenant-main.js",
+    "record-eval": "node dist/record-eval-main.js"
   },
   "dependencies": {
     "@sartre/connectors": "*",
@@ -17,6 +22,7 @@
     "@sartre/db": "*",
     "@sartre/learning": "*",
     "@sartre/modules": "*",
+    "@sartre/operations": "*",
     "@sartre/pipelines": "*",
     "@sartre/skills": "*",
     "zod": "^3.24.2"

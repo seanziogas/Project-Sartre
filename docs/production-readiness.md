@@ -11,10 +11,12 @@ The codebase is deployable; production activation still depends on deployment-ow
 - Configure `SARTRE_PUBLIC_BASE_URL` and register the exact HTTPS OAuth callback with each client-owned provider app.
 - Supply `ANTHROPIC_API_KEY` only to services that need live LLM execution. The production model remains `claude-opus-4-8`; CI and local tests use scripted fakes.
 - Route runner `GET /healthz` for liveness and `GET /readyz` for readiness on `SARTRE_HEALTH_PORT` (default `3001`). Route ops `GET /api/health` as its database readiness probe.
+- Configure `OTEL_EXPORTER_OTLP_ENDPOINT` and optional JSON `OTEL_EXPORTER_OTLP_HEADERS` for the deployment collector. Alert on portal SLOs and collector-side runner/pipeline telemetry; payloads and credentials are never exported.
 - Run `npm run preflight` with deployment configuration before starting traffic. It performs metadata-only validation and never decrypts or tests provider credentials.
 - Run `npm run simulate` before activation. It reports enabled-module blockers, human gates, proposed effects, destinations, fields, audiences/statements, connection readiness, costs, and budget caps without constructing provider clients or executing effects.
 - Alert on runner restarts, readiness failures, failed runs, unresolved gates, budget exhaustion, connector test failures, and quality/MVD regressions.
 - Complete a restore drill, a credential-revocation drill, and a tenant-isolation review before onboarding real client data.
+- Set and review a governance policy for every production tenant. Store portability bundles as encrypted, access-controlled client data; `portability-exports/` is gitignored but local filesystem permissions are not a substitute for managed backup storage.
 
 ## Release checks
 
@@ -37,5 +39,7 @@ Then perform provider-specific connection tests using non-production test tenant
 - Schedule firing is claimed durably per tenant/module/minute. Declared external effects are claimed by run/step idempotency key; a completed claim reuses its receipt, while an ambiguous pending claim stops for operator review instead of replaying.
 - Outbound messages, CRM changes, audience mutations, warehouse effects, and Brain changes remain behind structural human gates.
 - Brain changes remain evaluated drafts until an authorized human resolves `brain_change`; there is no auto-activation path.
+- Governance approvals authorize later operator commands; they never execute deletion, restore, export, or retention automatically. A configuration-promotion approval performs only the requested stage transition. Deletion and promotion enforce requester/approver separation.
+- The runner consumes immutable production configuration releases when present. Working files remain the development source and fallback for tenants that have not entered the release workflow.
 - Revocation destroys the stored credential envelope and appends an audit event. Connection creation, testing, rotation, and revocation are tenant-scoped and audited.
 - Machine-owned MVD and health state live in Postgres runtime artifacts. Git-backed client files remain the source for reviewed manifests and approved Brain documents.

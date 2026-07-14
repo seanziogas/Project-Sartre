@@ -10,6 +10,7 @@
     { "path": "../../packages/core" },
     { "path": "../../packages/db" },
     { "path": "../../packages/modules" },
+    { "path": "../../packages/operations" },
     { "path": "../../packages/pipelines" },
     { "path": "../../packages/skills" }
   ]

@@ -8,6 +8,10 @@ export function ClientTabs({ clientId, active, showCopilot = false }: { clientId
     { key: 'runs', label: 'Runs', href: `${base}/runs` },
     { key: 'health', label: 'Data Health', href: `${base}/health` },
     { key: 'connections', label: 'Connections', href: `${base}/connections` },
+    { key: 'operations', label: 'Operations', href: `${base}/operations` },
+    { key: 'learning', label: 'Learning', href: `${base}/learning` },
+    { key: 'releases', label: 'Releases', href: `${base}/releases` },
+    { key: 'governance', label: 'Governance', href: `${base}/governance` },
     ...(showCopilot ? [{ key: 'copilot', label: 'Copilot', href: `${base}/copilot` }] : []),
   ]
   return (

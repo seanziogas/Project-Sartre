@@ -19,20 +19,45 @@ import {
   PostgresToolConnectionStore,
   PostgresToolConnectionEventStore,
   PostgresConnectorSnapshotStore,
+  PostgresEffectLedger,
+  PostgresScheduleClaimStore,
 } from '../src/index.js'
-import type { Queryable } from '../src/index.js'
+import type { Queryable, TenantQueryable } from '../src/index.js'
 
 const templatePath = resolve(import.meta.dirname, '../../../clients/_template/client.yaml')
 
-let db: Queryable
+let db: TenantQueryable
 
 beforeAll(async () => {
   const pglite = new PGlite()
+  let scopedQueue = Promise.resolve()
+  const scoped = <T>(setting: string, value: string, run: () => Promise<T>): Promise<T> => {
+    const result = scopedQueue.then(async () => {
+      await pglite.query('BEGIN')
+      try {
+        await pglite.query(`SELECT set_config('${setting}', $1, true)`, [value])
+        const output = await run()
+        await pglite.query('COMMIT')
+        return output
+      } catch (error) {
+        await pglite.query('ROLLBACK')
+        throw error
+      }
+    })
+    scopedQueue = result.then(() => undefined, () => undefined)
+    return result
+  }
   db = {
     query: async (sql, params) => {
       const res = await pglite.query(sql, params as never[])
       return { rows: res.rows as unknown[] }
     },
+    queryTenant: (clientId, sql, params) => scoped('sartre.client_id', clientId, async () => {
+      const res = await pglite.query(sql, params as never[]); return { rows: res.rows as unknown[] }
+    }),
+    querySystem: (sql, params) => scoped('sartre.system_access', 'on', async () => {
+      const res = await pglite.query(sql, params as never[]); return { rows: res.rows as unknown[] }
+    }),
   }
   // PGlite runs one statement per query call for parameterized queries, but
   // multi-statement migration text works via exec
@@ -132,6 +157,22 @@ describe('PostgresRuntimeArtifactStore (against PGlite)', () => {
     expect(await store.get('ArtifactAcme', 'mvd')).toEqual({ 'revops.tam': { status: 'green' } })
     expect(await store.get('OtherClient', 'mvd')).toBeNull()
   })
+
+  it('enforces row-level security when a query omits tenant context', async () => {
+    await db.query('RESET sartre.client_id')
+    await db.query('RESET sartre.system_access')
+    await db.query('CREATE ROLE sartre_rls_test')
+    await db.query('GRANT SELECT, INSERT ON runtime_artifacts TO sartre_rls_test')
+    await db.query('SET ROLE sartre_rls_test')
+    try {
+      const raw = await db.query('SELECT value FROM runtime_artifacts')
+      expect(raw.rows).toHaveLength(0)
+      await expect(db.query("INSERT INTO runtime_artifacts (client_id, artifact_key, value, updated_at) VALUES ('Other', 'x', '{}', now())"))
+        .rejects.toThrow()
+    } finally {
+      await db.query('RESET ROLE')
+    }
+  })
 })
 
 describe('PostgresCacheStore (against PGlite)', () => {
@@ -221,6 +262,27 @@ describe('PostgresFeedbackLog (against PGlite)', () => {
     expect(listed).toHaveLength(1)
     expect(listed[0]).toMatchObject({ id: 'evt-1', action: 'approve' })
     expect(await log.list('OtherClient')).toHaveLength(0)
+  })
+})
+
+describe('durable execution claims (against PGlite)', () => {
+  it('allows one schedule claim across replicas', async () => {
+    const first = new PostgresScheduleClaimStore(db)
+    const second = new PostgresScheduleClaimStore(db)
+    expect(await first.claim('ClaimAcme', 'platform.metrics', '2026-07-14T12:00')).toBe(true)
+    expect(await second.claim('ClaimAcme', 'platform.metrics', '2026-07-14T12:00')).toBe(false)
+    expect(await second.claim('OtherClaim', 'platform.metrics', '2026-07-14T12:00')).toBe(true)
+  })
+
+  it('returns completed effects and refuses ambiguous or changed replays', async () => {
+    const ledger = new PostgresEffectLedger(db)
+    let calls = 0
+    expect(await ledger.execute('EffectAcme', 'run:gate', { to: 'a@example.com' }, async () => ({ id: `m${++calls}` }))).toEqual({ id: 'm1' })
+    expect(await ledger.execute('EffectAcme', 'run:gate', { to: 'a@example.com' }, async () => ({ id: `m${++calls}` }))).toEqual({ id: 'm1' })
+    expect(calls).toBe(1)
+    await expect(ledger.execute('EffectAcme', 'run:gate', { to: 'b@example.com' }, async () => ({}))).rejects.toThrow('different payload')
+    await expect(ledger.execute('EffectAcme', 'ambiguous', {}, async () => { throw new Error('response lost') })).rejects.toThrow('response lost')
+    await expect(ledger.execute('EffectAcme', 'ambiguous', {}, async () => ({}))).rejects.toThrow('pending reconciliation')
   })
 })
 

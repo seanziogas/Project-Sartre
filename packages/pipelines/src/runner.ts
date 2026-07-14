@@ -52,6 +52,8 @@ export interface RunnerDeps {
   /** Called when an interval-driven tick cannot complete. */
   onTickError?: (error: Error) => void
   onOperationalEvent?: (event: RunnerOperationalEvent) => void
+  scheduleClaims?: { claim(clientId: string, moduleId: string, minuteSlot: string): Promise<boolean> }
+  effects?: { execute<T>(clientId: string, idempotencyKey: string, payload: unknown, perform: () => Promise<T>): Promise<T> }
 }
 
 export interface RunnerOperationalEvent {
@@ -73,7 +75,10 @@ export class Runner {
 
   constructor(private readonly deps: RunnerDeps) {
     this.now = deps.now ?? (() => new Date())
-    this.engine = deps.engine ?? new PipelineEngine(deps.store, { now: this.now })
+    this.engine = deps.engine ?? new PipelineEngine(deps.store, {
+      now: this.now,
+      ...(deps.effects ? { effects: deps.effects } : {}),
+    })
   }
 
   async tick(): Promise<TickReport> {
@@ -125,6 +130,10 @@ export class Runner {
         if (!matches) continue
         const slotKey = `${clientId}:${moduleId}:${minuteSlot}`
         if (this.firedSlots.has(slotKey)) continue
+        if (this.deps.scheduleClaims && !(await this.deps.scheduleClaims.claim(clientId, moduleId, minuteSlot))) {
+          this.firedSlots.add(slotKey)
+          continue
+        }
         const def = this.deps.registry.forModule(moduleId)
         if (!def) {
           warn(`${clientId}/${moduleId}: schedule fired but no pipeline registered for module`, {

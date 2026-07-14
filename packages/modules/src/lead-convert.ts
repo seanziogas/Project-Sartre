@@ -63,6 +63,7 @@ export function buildLeadConvertPipeline(source: ClientDeps<LeadConvertDeps>): P
       },
       {
         id: 'convert',
+        effect: true,
         run: async (ctx) => {
           const deps = await resolveClientDeps(source, ctx.clientId)
           const plan = ctx.outputs.plan as LeadConversionPlan

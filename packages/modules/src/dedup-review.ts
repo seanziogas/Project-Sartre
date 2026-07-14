@@ -65,6 +65,7 @@ export function buildDedupReviewPipeline(source: ClientDeps<DedupReviewDeps>): P
       },
       {
         id: 'write',
+        effect: true,
         run: async (ctx) => {
           const deps = await resolveClientDeps(source, ctx.clientId)
           const { writes } = ctx.outputs.prepare as PreparedDedupReview

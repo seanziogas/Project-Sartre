@@ -1,12 +1,13 @@
 import { isOAuthProvider, validateProviderCredentials } from '@sartre/connectors'
 import type { OAuthExchangeInput, OAuthProviderId } from '@sartre/connectors'
+import type { CredentialKeyConfig } from '@sartre/connectors'
 import { openOAuthState } from './oauth-state'
 
 interface CallbackIdentity { email: string }
 interface CallbackManifest { commercial: { status: string } }
 
 export interface OAuthCallbackDependencies {
-  encryptionKey?: string
+  encryptionKey?: CredentialKeyConfig
   getIdentity(): Promise<CallbackIdentity>
   assertAccess(identity: CallbackIdentity, clientId: string): void
   getManifest(clientId: string): Promise<CallbackManifest | null>
@@ -62,6 +63,7 @@ export async function handleOAuthCallback(request: Request, deps: OAuthCallbackD
       ...(payload.accountsUrl ? { accountsUrl: payload.accountsUrl } : {}),
       ...(payload.accountUrl ? { accountUrl: payload.accountUrl } : {}),
       ...(payload.workspaceUrl ? { workspaceUrl: payload.workspaceUrl } : {}),
+      ...(payload.codeVerifier ? { codeVerifier: payload.codeVerifier } : {}),
     })
     credentials = { ...exchanged, ...oauthConnectionExtras(payload) }
     validateProviderCredentials(provider, credentials, 'oauth')

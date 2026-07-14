@@ -6,7 +6,9 @@
   "scripts": {
     "build": "tsc -b",
     "start": "node dist/main.js",
-    "preflight": "node dist/preflight-main.js"
+    "preflight": "node dist/preflight-main.js",
+    "rotate-credentials": "node dist/rotate-credentials-main.js",
+    "simulate": "node dist/simulate-main.js"
   },
   "dependencies": {
     "@sartre/connectors": "*",

@@ -49,7 +49,12 @@ export interface Queryable {
   query(sql: string, params?: unknown[]): Promise<{ rows: unknown[] }>
 }
 
-export interface PostgresConnection extends Queryable {
+export interface TenantQueryable extends Queryable {
+  queryTenant(clientId: string, sql: string, params?: unknown[]): Promise<{ rows: unknown[] }>
+  querySystem(sql: string, params?: unknown[]): Promise<{ rows: unknown[] }>
+}
+
+export interface PostgresConnection extends TenantQueryable {
   close(): Promise<void>
 }
 
@@ -68,8 +73,37 @@ export function createPostgresConnection(
       const result = await pool.query(sql, params)
       return { rows: result.rows as unknown[] }
     },
+    queryTenant: async (clientId, sql, params) => scopedPoolQuery(pool, 'sartre.client_id', clientId, sql, params),
+    querySystem: async (sql, params) => scopedPoolQuery(pool, 'sartre.system_access', 'on', sql, params),
     close: async () => pool.end(),
   }
+}
+
+async function scopedPoolQuery(pool: Pool, setting: string, value: string, sql: string, params?: unknown[]) {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(`SELECT set_config('${setting}', $1, true)`, [value])
+    const result = await client.query(sql, params)
+    await client.query('COMMIT')
+    return { rows: result.rows as unknown[] }
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+function tenantQuery(db: Queryable, clientId: string, sql: string, params?: unknown[]) {
+  assertClientId(clientId)
+  return 'queryTenant' in db
+    ? (db as TenantQueryable).queryTenant(clientId, sql, params)
+    : db.query(sql, params)
+}
+
+function systemQuery(db: Queryable, sql: string, params?: unknown[]) {
+  return 'querySystem' in db ? (db as TenantQueryable).querySystem(sql, params) : db.query(sql, params)
 }
 
 export async function migrate(db: Queryable): Promise<void> {
@@ -180,6 +214,43 @@ export async function migrate(db: Queryable): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS runtime_artifacts_client_idx
       ON runtime_artifacts (client_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS schedule_claims (
+      client_id text NOT NULL,
+      module_id text NOT NULL,
+      minute_slot text NOT NULL,
+      claimed_at timestamptz NOT NULL,
+      PRIMARY KEY (client_id, module_id, minute_slot)
+    );
+
+    CREATE TABLE IF NOT EXISTS effect_claims (
+      client_id text NOT NULL,
+      idempotency_key text NOT NULL,
+      payload_hash text NOT NULL,
+      status text NOT NULL CHECK (status IN ('pending', 'completed')),
+      receipt jsonb,
+      created_at timestamptz NOT NULL,
+      completed_at timestamptz,
+      PRIMARY KEY (client_id, idempotency_key)
+    );
+
+    DO $rls$
+    DECLARE table_name text;
+    BEGIN
+      FOREACH table_name IN ARRAY ARRAY[
+        'runs', 'feedback_events', 'tool_connections', 'tool_connection_events',
+        'connector_snapshots', 'staged_batches', 'canonical_records', 'runtime_artifacts',
+        'schedule_claims', 'effect_claims'
+      ] LOOP
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
+        EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
+        EXECUTE format('DROP POLICY IF EXISTS sartre_tenant_isolation ON %I', table_name);
+        EXECUTE format(
+          'CREATE POLICY sartre_tenant_isolation ON %I USING (client_id = current_setting(''sartre.client_id'', true) OR current_setting(''sartre.system_access'', true) = ''on'') WITH CHECK (client_id = current_setting(''sartre.client_id'', true) OR current_setting(''sartre.system_access'', true) = ''on'')',
+          table_name
+        );
+      END LOOP;
+    END $rls$;
   `)
 }
 
@@ -190,7 +261,7 @@ export class PostgresRuntimeArtifactStore {
   async put(clientId: string, key: string, value: unknown, updatedAt = new Date().toISOString()): Promise<void> {
     assertClientId(clientId)
     if (!key.trim()) throw new Error('runtime artifact key is required')
-    await this.db.query(
+    await tenantQuery(this.db, clientId,
       `INSERT INTO runtime_artifacts (client_id, artifact_key, value, updated_at)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (client_id, artifact_key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
@@ -200,7 +271,7 @@ export class PostgresRuntimeArtifactStore {
 
   async get<T>(clientId: string, key: string): Promise<T | null> {
     assertClientId(clientId)
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       'SELECT value FROM runtime_artifacts WHERE client_id = $1 AND artifact_key = $2',
       [clientId, key],
     )
@@ -227,7 +298,7 @@ export class PostgresToolConnectionStore {
     if (!input.connectionId || !input.provider.trim() || !input.label.trim() || !input.encryptedCredentials) {
       throw new Error('connection id, provider, label, and encrypted credentials are required')
     }
-    await this.db.query(
+    await tenantQuery(this.db, input.clientId,
       `INSERT INTO tool_connections
          (client_id, connection_id, provider, auth_kind, label, status, encrypted_credentials, metadata, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -243,7 +314,7 @@ export class PostgresToolConnectionStore {
 
   async get(clientId: string, connectionId: string): Promise<StoredToolConnection | null> {
     assertClientId(clientId)
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       `SELECT client_id, connection_id, provider, auth_kind, label, status, encrypted_credentials, metadata, created_at, updated_at
        FROM tool_connections WHERE client_id = $1 AND connection_id = $2`,
       [clientId, connectionId],
@@ -253,7 +324,7 @@ export class PostgresToolConnectionStore {
 
   async list(clientId: string, includeRevoked = false): Promise<ToolConnectionSummary[]> {
     assertClientId(clientId)
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       `SELECT client_id, connection_id, provider, auth_kind, label, status, metadata, created_at, updated_at
        FROM tool_connections WHERE client_id = $1 AND ($2::boolean OR status = 'active')
        ORDER BY provider, updated_at DESC`,
@@ -264,7 +335,7 @@ export class PostgresToolConnectionStore {
 
   async revoke(clientId: string, connectionId: string, revokedAt: string): Promise<boolean> {
     assertClientId(clientId)
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       `UPDATE tool_connections SET status = 'revoked', encrypted_credentials = '', updated_at = $3
        WHERE client_id = $1 AND connection_id = $2 AND status = 'active' RETURNING connection_id`,
       [clientId, connectionId, revokedAt],
@@ -279,7 +350,7 @@ export class PostgresToolConnectionEventStore {
   async append(event: ToolConnectionEvent): Promise<void> {
     assertClientId(event.clientId)
     if (!event.actor.trim()) throw new Error('connection event actor is required')
-    await this.db.query(
+    await tenantQuery(this.db, event.clientId,
       `INSERT INTO tool_connection_events (event_id, connection_id, client_id, kind, actor, detail, occurred_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (event_id) DO NOTHING`,
       [event.eventId, event.connectionId, event.clientId, event.kind, event.actor, event.detail, event.occurredAt],
@@ -289,7 +360,7 @@ export class PostgresToolConnectionEventStore {
   async list(clientId: string, limit = 100): Promise<ToolConnectionEvent[]> {
     assertClientId(clientId)
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error('connection event limit must be 1-500')
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       `SELECT event_id, connection_id, client_id, kind, actor, detail, occurred_at
        FROM tool_connection_events WHERE client_id = $1 ORDER BY occurred_at DESC LIMIT $2`,
       [clientId, limit],
@@ -313,7 +384,7 @@ export class PostgresConnectorSnapshotStore implements ConnectorSnapshotStore {
   async capture(provider: string, writes: NamespacedWrite[], sourceValues: unknown[]): Promise<string> {
     if (!provider.trim() || writes.length !== sourceValues.length) throw new Error('snapshot provider and aligned source values are required')
     const snapshotId = randomUUID()
-    await this.db.query(
+    await tenantQuery(this.db, this.clientId,
       `INSERT INTO connector_snapshots (client_id, snapshot_id, provider, writes, source_values, created_at)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [this.clientId, snapshotId, provider, JSON.stringify(writes), JSON.stringify(sourceValues), new Date().toISOString()],
@@ -322,7 +393,7 @@ export class PostgresConnectorSnapshotStore implements ConnectorSnapshotStore {
   }
 
   async exists(provider: string, snapshotRef: string): Promise<boolean> {
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, this.clientId,
       `SELECT snapshot_id FROM connector_snapshots WHERE client_id = $1 AND provider = $2 AND snapshot_id = $3`,
       [this.clientId, provider, snapshotRef],
     )
@@ -340,7 +411,7 @@ export class PostgresStagingStore {
     const batchId = idempotencyKey?.trim() || createHash('sha256')
       .update(JSON.stringify({ clientId, batch }))
       .digest('hex')
-    await this.db.query(
+    await tenantQuery(this.db, clientId,
       `INSERT INTO staged_batches
          (batch_id, client_id, connector_id, object_type, extracted_at, cursor_value, batch)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -359,7 +430,7 @@ export class PostgresStagingStore {
 
   async get(clientId: string, batchId: string): Promise<StoredStagedBatch | null> {
     assertClientId(clientId)
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       'SELECT batch_id, client_id, batch FROM staged_batches WHERE client_id = $1 AND batch_id = $2',
       [clientId, batchId],
     )
@@ -373,7 +444,7 @@ export class PostgresStagingStore {
     assertClientId(clientId)
     const limit = filters.limit ?? 100
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('staging list limit must be 1-1000')
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       `SELECT batch_id, client_id, batch FROM staged_batches
        WHERE client_id = $1
          AND ($2::text IS NULL OR connector_id = $2)
@@ -410,7 +481,7 @@ export class PostgresCanonicalStore {
         throw new Error(`${recordType} external id ${system}:${externalId} already belongs to ${existing.id}`)
       }
     }
-    await this.db.query(
+    await tenantQuery(this.db, clientId,
       `INSERT INTO canonical_records
          (client_id, record_type, record_id, external_ids, doc, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -431,7 +502,7 @@ export class PostgresCanonicalStore {
 
   async get(clientId: string, recordType: CanonicalRecordType, recordId: string): Promise<CanonicalRecord | null> {
     assertClientId(clientId)
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       `SELECT doc FROM canonical_records
        WHERE client_id = $1 AND record_type = $2 AND record_id = $3`,
       [clientId, recordType, recordId],
@@ -447,7 +518,7 @@ export class PostgresCanonicalStore {
   ): Promise<CanonicalRecord | null> {
     assertClientId(clientId)
     if (!system.trim() || !externalId.trim()) throw new Error('external id system and value are required')
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       `SELECT doc FROM canonical_records
        WHERE client_id = $1 AND record_type = $2 AND external_ids @> $3::jsonb
        ORDER BY updated_at DESC LIMIT 1`,
@@ -459,7 +530,7 @@ export class PostgresCanonicalStore {
   async list(clientId: string, recordType: CanonicalRecordType, limit = 500): Promise<CanonicalRecord[]> {
     assertClientId(clientId)
     if (!Number.isInteger(limit) || limit < 1 || limit > 5000) throw new Error('canonical list limit must be 1-5000')
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       `SELECT doc FROM canonical_records
        WHERE client_id = $1 AND record_type = $2
        ORDER BY updated_at DESC LIMIT $3`,
@@ -470,7 +541,7 @@ export class PostgresCanonicalStore {
 
   async listAll(clientId: string, recordType: CanonicalRecordType): Promise<CanonicalRecord[]> {
     assertClientId(clientId)
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       `SELECT doc FROM canonical_records
        WHERE client_id = $1 AND record_type = $2
        ORDER BY updated_at DESC`,
@@ -636,12 +707,12 @@ export class PostgresRunStore implements RunnerStore {
   constructor(private readonly db: Queryable) {}
 
   async get(runId: string): Promise<RunRecord | null> {
-    const { rows } = await this.db.query('SELECT doc FROM runs WHERE run_id = $1', [runId])
+    const { rows } = await systemQuery(this.db, 'SELECT doc FROM runs WHERE run_id = $1', [runId])
     return rows.length > 0 ? ((rows[0] as { doc: RunRecord }).doc) : null
   }
 
   async getScoped(clientId: string, runId: string): Promise<RunRecord | null> {
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       'SELECT doc FROM runs WHERE client_id = $1 AND run_id = $2',
       [clientId, runId],
     )
@@ -649,7 +720,7 @@ export class PostgresRunStore implements RunnerStore {
   }
 
   async save(run: RunRecord): Promise<void> {
-    await this.db.query(
+    await tenantQuery(this.db, run.clientId,
       `INSERT INTO runs (run_id, client_id, pipeline_id, module_id, status, doc, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (run_id) DO UPDATE
@@ -664,7 +735,7 @@ export class PostgresRunStore implements RunnerStore {
       if (!current) throw new Error(`run ${input.runId} not found`)
       const original = JSON.stringify(current)
       applyGateDecision(current, input)
-      const { rows } = await this.db.query(
+      const { rows } = await tenantQuery(this.db, current.clientId,
         `UPDATE runs SET status = $2, doc = $3, updated_at = $4
          WHERE run_id = $1 AND doc = $5::jsonb
          RETURNING doc`,
@@ -676,7 +747,7 @@ export class PostgresRunStore implements RunnerStore {
   }
 
   async list(clientId: string): Promise<RunRecord[]> {
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       'SELECT doc FROM runs WHERE client_id = $1 ORDER BY updated_at DESC',
       [clientId],
     )
@@ -684,7 +755,7 @@ export class PostgresRunStore implements RunnerStore {
   }
 
   async listByStatus(status: RunStatus): Promise<RunRecord[]> {
-    const { rows } = await this.db.query('SELECT doc FROM runs WHERE status = $1', [status])
+    const { rows } = await systemQuery(this.db, 'SELECT doc FROM runs WHERE status = $1', [status])
     return rows.map((r) => (r as { doc: RunRecord }).doc)
   }
 }
@@ -710,7 +781,7 @@ export class PostgresFeedbackLog {
   constructor(private readonly db: Queryable) {}
 
   async append(event: FeedbackEvent): Promise<void> {
-    await this.db.query(
+    await tenantQuery(this.db, event.clientId,
       `INSERT INTO feedback_events (id, client_id, kind, occurred_at, event)
        VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING`,
       [event.id, event.clientId, event.kind, event.occurredAt, JSON.stringify(event)],
@@ -718,10 +789,64 @@ export class PostgresFeedbackLog {
   }
 
   async list(clientId: string, limit = 500): Promise<FeedbackEvent[]> {
-    const { rows } = await this.db.query(
+    const { rows } = await tenantQuery(this.db, clientId,
       'SELECT event FROM feedback_events WHERE client_id = $1 ORDER BY occurred_at DESC LIMIT $2',
       [clientId, limit],
     )
     return rows.map((r) => (r as { event: FeedbackEvent }).event)
+  }
+}
+
+/** Durable once-per-minute schedule claims shared by every runner replica. */
+export class PostgresScheduleClaimStore {
+  constructor(private readonly db: Queryable) {}
+
+  async claim(clientId: string, moduleId: string, minuteSlot: string, claimedAt = new Date().toISOString()): Promise<boolean> {
+    assertClientId(clientId)
+    if (!moduleId.trim() || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(minuteSlot)) throw new Error('module id and UTC minute slot are required')
+    const { rows } = await tenantQuery(this.db, clientId,
+      `INSERT INTO schedule_claims (client_id, module_id, minute_slot, claimed_at)
+       VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING RETURNING minute_slot`,
+      [clientId, moduleId, minuteSlot, claimedAt],
+    )
+    return rows.length === 1
+  }
+}
+
+/**
+ * Durable effect ledger. A pending claim is deliberately not replayed: it may
+ * represent a provider effect whose response was lost and requires review.
+ */
+export class PostgresEffectLedger {
+  constructor(private readonly db: Queryable) {}
+
+  async execute<T>(clientId: string, idempotencyKey: string, payload: unknown, perform: () => Promise<T>): Promise<T> {
+    assertClientId(clientId)
+    if (!idempotencyKey.trim()) throw new Error('effect idempotency key is required')
+    const payloadHash = createHash('sha256').update(JSON.stringify(payload)).digest('hex')
+    const createdAt = new Date().toISOString()
+    const { rows: claimed } = await tenantQuery(this.db, clientId,
+      `INSERT INTO effect_claims (client_id, idempotency_key, payload_hash, status, created_at)
+       VALUES ($1, $2, $3, 'pending', $4) ON CONFLICT DO NOTHING RETURNING idempotency_key`,
+      [clientId, idempotencyKey, payloadHash, createdAt],
+    )
+    if (claimed.length === 0) {
+      const { rows } = await tenantQuery(this.db, clientId,
+        `SELECT payload_hash, status, receipt FROM effect_claims WHERE client_id = $1 AND idempotency_key = $2`,
+        [clientId, idempotencyKey],
+      )
+      const existing = rows[0] as { payload_hash: string; status: 'pending' | 'completed'; receipt: T | null } | undefined
+      if (!existing) throw new Error('effect claim disappeared')
+      if (existing.payload_hash !== payloadHash) throw new Error(`effect idempotency key ${idempotencyKey} was reused with different payload`)
+      if (existing.status === 'completed') return existing.receipt as T
+      throw new Error(`effect ${idempotencyKey} is pending reconciliation and will not be replayed`)
+    }
+    const receipt = await perform()
+    await tenantQuery(this.db, clientId,
+      `UPDATE effect_claims SET status = 'completed', receipt = $3, completed_at = $4
+       WHERE client_id = $1 AND idempotency_key = $2 AND status = 'pending'`,
+      [clientId, idempotencyKey, JSON.stringify(receipt), new Date().toISOString()],
+    )
+    return receipt
   }
 }

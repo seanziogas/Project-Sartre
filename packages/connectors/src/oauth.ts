@@ -1,5 +1,6 @@
 import { requestJson } from './http.js'
 import type { HttpTransport } from './http.js'
+import { createHash, randomBytes } from 'node:crypto'
 
 export type OAuthProviderId =
   | 'salesforce' | 'hubspot' | 'slack' | 'teams' | 'fathom'
@@ -30,11 +31,18 @@ export interface OAuthAuthorizationInput {
   instanceUrl?: string
   accountUrl?: string
   workspaceUrl?: string
+  codeChallenge?: string
+  codeVerifier?: string
 }
 
 export interface OAuthExchangeInput extends OAuthAuthorizationInput {
   clientSecret: string
   code: string
+}
+
+export function createOAuthPkce(): { codeVerifier: string; codeChallenge: string } {
+  const codeVerifier = randomBytes(48).toString('base64url')
+  return { codeVerifier, codeChallenge: createHash('sha256').update(codeVerifier).digest('base64url') }
 }
 
 const defaults: Record<OAuthProviderId, { authorize: string; token: string; scopes: string[]; tokenAuth?: 'basic'; retainClientId?: boolean }> = {
@@ -161,6 +169,10 @@ export function oauthAuthorizationUrl(provider: OAuthProviderId, input: OAuthAut
   url.searchParams.set('redirect_uri', required(input.redirectUri, 'redirectUri'))
   url.searchParams.set('state', required(input.state, 'state'))
   url.searchParams.set('response_type', 'code')
+  if (input.codeChallenge) {
+    url.searchParams.set('code_challenge', input.codeChallenge)
+    url.searchParams.set('code_challenge_method', 'S256')
+  }
   const scopes = input.scopes ?? (provider === 'dynamics' && input.instanceUrl
     ? ['offline_access', `${dynamicsOrigin(input.instanceUrl)}/user_impersonation`]
     : config.scopes)
@@ -185,6 +197,7 @@ export async function exchangeOAuthCode(
     client_id: required(input.clientId, 'clientId'), client_secret: required(input.clientSecret, 'clientSecret'),
     redirect_uri: required(input.redirectUri, 'redirectUri'),
   })
+  if (input.codeVerifier) form.set('code_verifier', input.codeVerifier)
   const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' }
   if (config.tokenAuth === 'basic') {
     headers.Authorization = `Basic ${Buffer.from(`${input.clientId}:${input.clientSecret}`).toString('base64')}`

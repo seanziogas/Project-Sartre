@@ -1,4 +1,5 @@
 import { CredentialVault } from '@sartre/connectors'
+import type { CredentialKeyConfig } from '@sartre/connectors'
 
 const STATE_TTL_MS = 10 * 60_000
 
@@ -13,7 +14,7 @@ export interface OAuthStateInput extends Record<string, string> {
 }
 
 export function sealOAuthState(
-  key: string,
+  key: CredentialKeyConfig,
   input: OAuthStateInput,
   now = Date.now(),
 ): string {
@@ -25,7 +26,7 @@ export function sealOAuthState(
 }
 
 export function openOAuthState(
-  key: string,
+  key: CredentialKeyConfig,
   state: string,
   now = Date.now(),
 ): { clientId: string; payload: Record<string, string> } {

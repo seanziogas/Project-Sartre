@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { exchangeOAuthCode, oauthAuthorizationUrl, refreshOAuthToken } from '../src/oauth.js'
+import { createOAuthPkce, exchangeOAuthCode, oauthAuthorizationUrl, refreshOAuthToken } from '../src/oauth.js'
 import type { HttpRequest, HttpTransport } from '../src/http.js'
 
 describe('provider OAuth', () => {
+  it('binds authorization codes with S256 PKCE', async () => {
+    const pkce = createOAuthPkce()
+    const authorization = new URL(oauthAuthorizationUrl('hubspot', {
+      clientId: 'client', redirectUri: 'https://sartre.example/callback', state: 'state', codeChallenge: pkce.codeChallenge,
+    }))
+    expect(authorization.searchParams.get('code_challenge')).toBe(pkce.codeChallenge)
+    expect(authorization.searchParams.get('code_challenge_method')).toBe('S256')
+    expect(authorization.toString()).not.toContain(pkce.codeVerifier)
+    let body = ''
+    await exchangeOAuthCode('hubspot', {
+      clientId: 'client', clientSecret: 'secret', redirectUri: 'https://sartre.example/callback', state: 'state', code: 'code', codeVerifier: pkce.codeVerifier,
+    }, { request: async (request) => { body = request.body ?? ''; return { status: 200, body: { access_token: 'token' }, headers: {} } } })
+    expect(new URLSearchParams(body).get('code_verifier')).toBe(pkce.codeVerifier)
+  })
   it('builds state-bearing provider authorization URLs with minimum scopes', () => {
     const slack = new URL(oauthAuthorizationUrl('slack', { clientId: 'client', redirectUri: 'https://sartre.example/callback', state: 'signed-state' }))
     expect(slack.origin + slack.pathname).toBe('https://slack.com/oauth/v2/authorize')

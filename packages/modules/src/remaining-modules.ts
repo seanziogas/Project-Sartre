@@ -38,7 +38,7 @@ function reviewedPipeline<TInput, TPlan extends ReviewPlan<unknown>>(
         ),
       },
       { id: 'review', run: async (ctx) => { const plan = ctx.outputs.prepare as TPlan; await ctx.gate(outputClass, plan); return plan } },
-      { id: 'execute', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).execute(ctx.clientId, ctx.outputs.prepare as TPlan) },
+      { id: 'execute', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).execute(ctx.clientId, ctx.outputs.prepare as TPlan) },
     ],
   }
 }
@@ -69,7 +69,7 @@ export function buildOutboundPipeline(source: ClientDeps<OutboundDeps>): Pipelin
         return plan
       } },
       { id: 'review', run: async (ctx) => { const plan = ctx.outputs.draft as OutboundPlan; await ctx.gate('outbound_send', plan); return plan } },
-      { id: 'enroll', run: async (ctx) => {
+      { id: 'enroll', effect: true, run: async (ctx) => {
         const deps = await resolveClientDeps(source, ctx.clientId)
         const plan = ctx.outputs.draft as OutboundPlan
         return deps.enroll(ctx.clientId, plan.campaign.rows.filter((row) => row.emails !== null))
@@ -92,7 +92,7 @@ export function buildAbmPipeline(source: ClientDeps<AbmDeps>): PipelineDefinitio
       { id: 'load', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadAccounts(ctx.clientId) },
       { id: 'plan', run: async (ctx) => { const deps = await resolveClientDeps(source, ctx.clientId); const items = (ctx.outputs.load as AbmInput).accounts.map((a) => deps.planAccount(ctx.clientId, a)).filter((x): x is AccountPlay => x !== null); return requirePlan({ summary: `${items.length} account plays`, items }, 'ABM plan') } },
       { id: 'review', run: async (ctx) => { const plan = ctx.outputs.plan as ReviewPlan<AccountPlay>; await ctx.gate('outbound_send', plan); return plan } },
-      { id: 'activate', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).activate(ctx.clientId, (ctx.outputs.plan as ReviewPlan<AccountPlay>).items) },
+      { id: 'activate', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).activate(ctx.clientId, (ctx.outputs.plan as ReviewPlan<AccountPlay>).items) },
     ],
   }
 }
@@ -110,7 +110,7 @@ export function buildTakeoutPipeline(source: ClientDeps<TakeoutDeps>): PipelineD
       { id: 'load', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadCandidates(ctx.clientId) },
       { id: 'prepare', run: async (ctx) => { const deps = await resolveClientDeps(source, ctx.clientId); const items = (ctx.outputs.load as TakeoutCandidate[]).map((c) => deps.preparePlay(ctx.clientId, c)).filter((x): x is TakeoutPlay => x !== null); return requirePlan({ summary: `${items.length} competitive takeout plays`, items }, 'takeout plan') } },
       { id: 'review', run: async (ctx) => { const plan = ctx.outputs.prepare as ReviewPlan<TakeoutPlay>; await ctx.gate('outbound_send', plan); return plan } },
-      { id: 'activate', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).activate(ctx.clientId, (ctx.outputs.prepare as ReviewPlan<TakeoutPlay>).items) },
+      { id: 'activate', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).activate(ctx.clientId, (ctx.outputs.prepare as ReviewPlan<TakeoutPlay>).items) },
     ],
   }
 }
@@ -146,7 +146,7 @@ export function buildRepWorkflowsPipeline(source: ClientDeps<RepWorkflowsDeps>):
         if (crmActions.length) await ctx.gate('crm_write', { ...plan, items: crmActions })
         return plan
       } },
-      { id: 'execute', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).executeApproved(ctx.clientId, ctx.outputs.draft as RepWorkflowPlan) },
+      { id: 'execute', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).executeApproved(ctx.clientId, ctx.outputs.draft as RepWorkflowPlan) },
     ],
   }
 }
@@ -171,7 +171,7 @@ export function buildCopyFactoryPipeline(source: ClientDeps<CopyFactoryDeps>): P
       { id: 'load', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadBrief(ctx.clientId) },
       { id: 'generate', run: async (ctx) => { const deps = await resolveClientDeps(source, ctx.clientId); return campaignFactory.generateCampaign((ctx.outputs.load as CopyFactoryInput).rows, deps.templates) } },
       { id: 'review', run: async (ctx) => { const campaign = ctx.outputs.generate as campaignFactory.CampaignResult; await ctx.gate('internal_report', campaign); return campaign } },
-      { id: 'publish', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).publishDrafts(ctx.clientId, ctx.outputs.generate as campaignFactory.CampaignResult) },
+      { id: 'publish', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).publishDrafts(ctx.clientId, ctx.outputs.generate as campaignFactory.CampaignResult) },
     ],
   }
 }
@@ -195,7 +195,7 @@ export function buildRoutingPipeline(source: ClientDeps<RoutingDeps>): PipelineD
       { id: 'load', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadRecords(ctx.clientId) },
       { id: 'route', run: async (ctx) => { const deps = await resolveClientDeps(source, ctx.clientId); const decisions = (ctx.outputs.load as RoutingInput).records.map((record) => router.route(record, deps.rules)); return requirePlan({ summary: `${decisions.filter((d) => d.decision === 'assigned').length} assignments; ${decisions.filter((d) => d.decision === 'manual_review').length} manual reviews`, items: decisions }, 'routing plan') } },
       { id: 'review', run: async (ctx) => { const plan = ctx.outputs.route as ReviewPlan<router.RoutingDecision>; await ctx.gate('crm_write', plan); return plan } },
-      { id: 'write', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).writeAssignments(ctx.clientId, (ctx.outputs.route as ReviewPlan<router.RoutingDecision>).items.filter((d) => d.decision === 'assigned')) },
+      { id: 'write', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).writeAssignments(ctx.clientId, (ctx.outputs.route as ReviewPlan<router.RoutingDecision>).items.filter((d) => d.decision === 'assigned')) },
     ],
   }
 }
@@ -219,7 +219,7 @@ export function buildEtlPipeline(source: ClientDeps<EtlDeps>): PipelineDefinitio
       { id: 'load', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadChanges(ctx.clientId) },
       { id: 'validate', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).validate(ctx.clientId, ctx.outputs.load as EtlChange[]) },
       { id: 'review', run: async (ctx) => { const result = ctx.outputs.validate as Awaited<ReturnType<EtlDeps['validate']>>; await ctx.gate('crm_write', { summary: `${result.valid.length} reverse-ETL writes; ${result.rejected.length} rejected`, ...result }); return result } },
-      { id: 'write', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).write(ctx.clientId, (ctx.outputs.validate as Awaited<ReturnType<EtlDeps['validate']>>).valid) },
+      { id: 'write', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).write(ctx.clientId, (ctx.outputs.validate as Awaited<ReturnType<EtlDeps['validate']>>).valid) },
     ],
   }
 }
@@ -233,7 +233,7 @@ export function buildSignalsPipeline(source: ClientDeps<SignalsDeps>): PipelineD
       { id: 'load', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadSignals(ctx.clientId) },
       { id: 'match', run: async (ctx) => { const deps = await resolveClientDeps(source, ctx.clientId); return signalWatcher.matchSignals((ctx.outputs.load as SignalsInput).signals, deps.rules) } },
       { id: 'review', run: async (ctx) => { const result = ctx.outputs.match as ReturnType<typeof signalWatcher.matchSignals>; if (result.matches.length) await ctx.gate('internal_report', result); return result } },
-      { id: 'persist', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).persistTriggers(ctx.clientId, (ctx.outputs.match as ReturnType<typeof signalWatcher.matchSignals>).matches) },
+      { id: 'persist', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).persistTriggers(ctx.clientId, (ctx.outputs.match as ReturnType<typeof signalWatcher.matchSignals>).matches) },
     ],
   }
 }
@@ -245,7 +245,7 @@ export function buildDigestsPipeline(source: ClientDeps<DigestsDeps>): PipelineD
     id: 'weekly-digests@0.1.0', moduleId: 'platform.digests', steps: [
       { id: 'prepare', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadDigest(ctx.clientId) },
       { id: 'review', run: async (ctx) => { const digest = ctx.outputs.prepare as Digest; if (!digest.title.trim() || !digest.markdown.trim()) throw new Error('digest title and content are required'); await ctx.gate('client_comms', digest); return digest } },
-      { id: 'deliver', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).deliver(ctx.clientId, ctx.outputs.prepare as Digest) },
+      { id: 'deliver', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).deliver(ctx.clientId, ctx.outputs.prepare as Digest) },
     ],
   }
 }
@@ -258,7 +258,7 @@ export function buildMetricsPipeline(source: ClientDeps<MetricsDeps>): PipelineD
       { id: 'load', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadMetrics(ctx.clientId) },
       { id: 'draft', run: async (ctx) => { const deps = await resolveClientDeps(source, ctx.clientId); if (!Number.isFinite(deps.tokenUsdPerReport) || deps.tokenUsdPerReport <= 0) throw new Error('tokenUsdPerReport must be finite and positive'); ctx.spendTokensUsd(deps.tokenUsdPerReport, 'drafted grounded metrics/QBR report'); return sowQbrGenerator.draftEngagementDocument(ctx.outputs.load as MetricsInput, deps.llm) } },
       { id: 'review', run: async (ctx) => { const report = ctx.outputs.draft as sowQbrGenerator.EngagementDocumentDraft; await ctx.gate('client_comms', report); return report } },
-      { id: 'publish', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).publish(ctx.clientId, ctx.outputs.draft as sowQbrGenerator.EngagementDocumentDraft) },
+      { id: 'publish', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).publish(ctx.clientId, ctx.outputs.draft as sowQbrGenerator.EngagementDocumentDraft) },
     ],
   }
 }

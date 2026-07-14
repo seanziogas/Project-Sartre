@@ -16,6 +16,8 @@
     "test": "vitest run",
     "typecheck": "tsc -b packages/* apps/runner && tsc --noEmit -p apps/ops/tsconfig.json",
     "preflight": "npm run preflight --workspace @sartre/runner",
+    "rotate-credentials": "npm run rotate-credentials --workspace @sartre/runner",
+    "simulate": "npm run simulate --workspace @sartre/runner",
     "shadow:fake": "node tools/shadow-hologram/run.mjs --fake --synthetic"
   },
   "devDependencies": {

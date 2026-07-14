@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { notFound, redirect } from 'next/navigation'
 import { canAccessClient } from '@sartre/core'
-import { isOAuthProvider, oauthAuthorizationUrl, OAUTH_PROVIDERS, PROVIDER_CATALOG } from '@sartre/connectors'
+import { createOAuthPkce, credentialKeyConfigFromEnvironment, isOAuthProvider, oauthAuthorizationUrl, OAUTH_PROVIDERS, PROVIDER_CATALOG } from '@sartre/connectors'
 import type { OAuthProviderId } from '@sartre/connectors'
 import { assertClientAccess, getPortalIdentity } from '@/lib/auth'
 import { connectTool, getManifest, listToolConnectionEvents, listToolConnections, revokeToolConnection, rotateToolConnection, testToolConnection } from '@/lib/data'
@@ -107,7 +107,7 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
     const providerValue = String(formData.get('oauthProvider') ?? '')
     if (!isOAuthProvider(providerValue)) throw new Error('unsupported OAuth provider')
     const provider = providerValue as OAuthProviderId
-    const key = process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY
+    const key = credentialKeyConfigFromEnvironment(process.env)
     const baseUrl = process.env.SARTRE_PUBLIC_BASE_URL
     if (!key || !baseUrl) throw new Error('credential encryption key and public base URL are required for OAuth')
     const publicUrl = new URL(baseUrl)
@@ -125,10 +125,12 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
         .map((name) => [name, String(formData.get(`oauth_${name}`) ?? '').trim()] as const)
         .filter(([, value]) => value !== ''),
     )
+    const pkce = createOAuthPkce()
     const state = sealOAuthState(key, {
       clientId, provider, actor: currentIdentity.email, label,
       oauthClientId, oauthClientSecret, redirectUri,
       ...extras,
+      codeVerifier: pkce.codeVerifier,
     })
     redirect(oauthAuthorizationUrl(provider, {
       clientId: oauthClientId, redirectUri, state,
@@ -138,6 +140,7 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
       ...(extras.instanceUrl ? { instanceUrl: extras.instanceUrl } : {}),
       ...(extras.accountUrl ? { accountUrl: extras.accountUrl } : {}),
       ...(extras.workspaceUrl ? { workspaceUrl: extras.workspaceUrl } : {}),
+      codeChallenge: pkce.codeChallenge,
     }))
   }
 

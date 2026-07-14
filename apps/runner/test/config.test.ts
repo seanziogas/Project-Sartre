@@ -12,5 +12,9 @@ describe('runner environment validation', () => {
     expect(() => loadRunnerConfig({ DATABASE_URL: 'x', SARTRE_TICK_MS: '1' })).toThrow()
     expect(() => loadRunnerConfig({ DATABASE_URL: 'x', SARTRE_HEALTH_PORT: '70000' })).toThrow()
     expect(() => loadRunnerConfig({ DATABASE_URL: 'x', SARTRE_CREDENTIAL_ENCRYPTION_KEY: 'bad' })).toThrow('32 bytes')
+    const key = Buffer.alloc(32, 1).toString('base64')
+    expect(loadRunnerConfig({ DATABASE_URL: 'x', SARTRE_CREDENTIAL_ENCRYPTION_KEYS: JSON.stringify({ current: key }), SARTRE_CREDENTIAL_CURRENT_KEY_ID: 'current' })).toMatchObject({
+      credentialKeys: { currentKeyId: 'current', keys: { current: key } },
+    })
   })
 })

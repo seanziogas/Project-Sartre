@@ -165,6 +165,8 @@ export interface StepContext {
 
 export interface PipelineStep {
   id: string
+  /** Durable idempotency boundary for a post-gate side-effect step. */
+  effect?: boolean
   run(ctx: StepContext): Promise<unknown>
 }
 

@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { PGlite } from '@electric-sql/pglite'
 import { parseManifest } from '@sartre/core'
 import { migrate, PostgresFeedbackLog, PostgresRunStore } from '@sartre/db'
-import type { Queryable } from '@sartre/db'
+import type { Queryable, TenantQueryable } from '@sartre/db'
 import { MapRegistry, PipelineEngine, Runner } from '@sartre/pipelines'
 import type { PipelineDefinition } from '@sartre/pipelines'
 import { OpsRunData } from '../src/lib/run-data.js'
@@ -12,15 +12,33 @@ import { OpsRunData } from '../src/lib/run-data.js'
 const templatePath = resolve(import.meta.dirname, '../../../clients/_template/client.yaml')
 
 let pglite: PGlite
-let db: Queryable
+let db: TenantQueryable
 
 beforeAll(async () => {
   pglite = new PGlite()
+  let scopedQueue = Promise.resolve()
+  const scoped = <T>(setting: string, value: string, run: () => Promise<T>): Promise<T> => {
+    const result = scopedQueue.then(async () => {
+      await pglite.query('BEGIN')
+      try {
+        await pglite.query(`SELECT set_config('${setting}', $1, true)`, [value])
+        const output = await run(); await pglite.query('COMMIT'); return output
+      } catch (error) { await pglite.query('ROLLBACK'); throw error }
+    })
+    scopedQueue = result.then(() => undefined, () => undefined)
+    return result
+  }
   db = {
     query: async (sql, params) => {
       const result = await pglite.query(sql, params as never[])
       return { rows: result.rows as unknown[] }
     },
+    queryTenant: (clientId, sql, params) => scoped('sartre.client_id', clientId, async () => {
+      const result = await pglite.query(sql, params as never[]); return { rows: result.rows as unknown[] }
+    }),
+    querySystem: (sql, params) => scoped('sartre.system_access', 'on', async () => {
+      const result = await pglite.query(sql, params as never[]); return { rows: result.rows as unknown[] }
+    }),
   }
   const raw = pglite as unknown as { exec(sql: string): Promise<unknown> }
   const migrateDb: Queryable = {

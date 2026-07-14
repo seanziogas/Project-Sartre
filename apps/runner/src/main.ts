@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { FileClientBrainStore, loadManifestsFromDir } from '@sartre/core'
-import { createPostgresConnection, migrate, PostgresRunStore, PostgresRuntimeArtifactStore, PostgresToolConnectionStore } from '@sartre/db'
+import { createPostgresConnection, migrate, PostgresEffectLedger, PostgresRunStore, PostgresRuntimeArtifactStore, PostgresScheduleClaimStore, PostgresToolConnectionStore } from '@sartre/db'
 import { Runner } from '@sartre/pipelines'
 import { AnthropicLlmClient } from '@sartre/skills'
 import { loadModuleDeps } from './deployment.js'
@@ -26,7 +26,7 @@ const llm = new AnthropicLlmClient('claude-opus-4-8')
 const brains = new FileClientBrainStore(config.clientsDir)
 const connections = new TenantConnectionResolver(
   new PostgresToolConnectionStore(connection),
-  config.encryptionKey,
+  config.credentialKeys,
 )
 const tools = new TenantToolClients(connection, connections)
 const artifacts = new PostgresRuntimeArtifactStore(connection)
@@ -75,6 +75,8 @@ const runner = new Runner({
   onOperationalEvent: ({ event, fields }) => log('warn', event, fields),
   onTickComplete: recordTickSuccess,
   onTickError: recordTickFailure,
+  scheduleClaims: new PostgresScheduleClaimStore(connection),
+  effects: new PostgresEffectLedger(connection),
 })
 
 const healthServer = startHealthServer(config.healthPort, readiness.isReady)

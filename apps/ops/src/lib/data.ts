@@ -6,7 +6,7 @@ import { parseManifest } from '@sartre/core'
 import type { ClientManifest, FeedbackEvent } from '@sartre/core'
 import type { RunRecord } from '@sartre/pipelines'
 import type { DataHealthReport } from '@sartre/data'
-import { createProviderClient, CredentialVault, isSupportedProvider, productionHttpTransport, ToolConnectionInput, validateProviderCredentials } from '@sartre/connectors'
+import { createProviderClient, credentialKeyConfigFromEnvironment, CredentialVault, isSupportedProvider, productionHttpTransport, ToolConnectionInput, validateProviderCredentials } from '@sartre/connectors'
 import type { ConnectionHealth, ToolConnectionEvent, ToolConnectionSummary } from '@sartre/connectors'
 import { getOpsDatabase } from './postgres'
 import { logOpsEvent, safeOperationalMessage } from './operational-log'
@@ -100,7 +100,7 @@ export async function connectTool(
 ): Promise<ToolConnectionSummary> {
   const parsed = ToolConnectionInput.parse(input)
   validateProviderCredentials(parsed.provider, parsed.credentials, parsed.authKind)
-  const key = process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY
+  const key = credentialKeyConfigFromEnvironment(process.env)
   if (!key) throw new Error('SARTRE_CREDENTIAL_ENCRYPTION_KEY is required to save connections')
   const now = new Date().toISOString()
   const database = await getOpsDatabase()
@@ -145,7 +145,7 @@ export async function rotateToolConnection(
   credentials: Record<string, string>,
   actor: string,
 ): Promise<ToolConnectionSummary> {
-  const key = process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY
+  const key = credentialKeyConfigFromEnvironment(process.env)
   if (!key) throw new Error('SARTRE_CREDENTIAL_ENCRYPTION_KEY is required to rotate connections')
   const database = await getOpsDatabase()
   const stored = await database.connections.get(clientId, connectionId)
@@ -171,7 +171,7 @@ export async function testToolConnection(
   connectionId: string,
   actor: string,
 ): Promise<ConnectionHealth> {
-  const key = process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY
+  const key = credentialKeyConfigFromEnvironment(process.env)
   if (!key) throw new Error('SARTRE_CREDENTIAL_ENCRYPTION_KEY is required to test connections')
   const database = await getOpsDatabase()
   const stored = await database.connections.get(clientId, connectionId)

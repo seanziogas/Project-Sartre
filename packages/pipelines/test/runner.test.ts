@@ -134,6 +134,22 @@ describe('Runner', () => {
     expect((await runner.tick()).scheduled).toHaveLength(1)
   })
 
+  it('uses a durable claim before firing a schedule across runner replicas', async () => {
+    const store = new MemoryRunStore()
+    const scheduled: PipelineDefinition = { id: 'durable@1', moduleId: 'revops.enrichment', steps: [{ id: 'run', run: async () => 'ok' }] }
+    const m = manifest((value) => { value.modules['revops.enrichment']!.schedule = '0 6 * * *' })
+    const claimed = new Set<string>()
+    const scheduleClaims = { claim: async (clientId: string, moduleId: string, slot: string) => {
+      const key = `${clientId}:${moduleId}:${slot}`
+      if (claimed.has(key)) return false
+      claimed.add(key)
+      return true
+    } }
+    const deps = { store, registry: new MapRegistry().register(scheduled), manifests: async () => new Map([['Acme', m]]), now: () => new Date('2026-07-09T06:00:00Z'), scheduleClaims }
+    expect((await new Runner(deps).tick()).scheduled).toHaveLength(1)
+    expect((await new Runner(deps).tick()).scheduled).toHaveLength(0)
+  })
+
   it('warns instead of crashing on unknown pipelines and bad cron', async () => {
     const store = new MemoryRunStore()
     const engine = new PipelineEngine(store, { runId: 'r1' })

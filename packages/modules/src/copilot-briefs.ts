@@ -68,6 +68,7 @@ export function buildCopilotBriefsPipeline(source: ClientDeps<CopilotBriefDeps>)
       },
       {
         id: 'publish',
+        effect: true,
         run: async (ctx) => {
           const deps = await resolveClientDeps(source, ctx.clientId)
           const batch = ctx.outputs.generate as CopilotBriefBatch

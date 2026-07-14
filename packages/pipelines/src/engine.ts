@@ -40,6 +40,7 @@ export interface EngineOptions {
   runId?: string
   /** Layer 8 capture: gate resolutions become feedback events. */
   onFeedbackEvent?: (event: HumanActionEvent) => void | Promise<void>
+  effects?: { execute<T>(clientId: string, idempotencyKey: string, payload: unknown, perform: () => Promise<T>): Promise<T> }
 }
 
 export class PipelineEngine {
@@ -180,7 +181,13 @@ export class PipelineEngine {
       this.journal(run, step.id, 'step_started', '')
       const ctx = this.stepContext(run, manifest, step.id, perRun)
       try {
-        const output = await step.run(ctx)
+        const output = step.effect && this.options.effects
+          ? await this.options.effects.execute(run.clientId, `${run.runId}:${step.id}`, {
+              pipelineId: run.pipelineId,
+              stepId: step.id,
+              inputs: { ...ctx.outputs },
+            }, () => step.run(ctx))
+          : await step.run(ctx)
         run.checkpoints[step.id] = output
         this.journal(run, step.id, 'step_completed', '')
         await this.store.save(run)

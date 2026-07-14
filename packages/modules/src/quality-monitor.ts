@@ -78,6 +78,7 @@ export function buildQualityMonitorPipeline(source: ClientDeps<QualityMonitorDep
       },
       {
         id: 'notify',
+        effect: true,
         run: async (ctx) => {
           const deps = await resolveClientDeps(source, ctx.clientId)
           const alert = ctx.outputs.evaluate as QualityAlert | null

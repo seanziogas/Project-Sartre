@@ -104,9 +104,20 @@ export function buildEnrichmentRefreshPipeline(source: ClientDeps<EnrichmentRefr
             const subject = 'Data health alert'
             const body = lines.join('\n')
             await ctx.gate('client_comms', { subject, body, report: result })
-            await deps.notify(ctx.clientId, subject, body)
+            return { ...result, alert: { subject, body } }
           }
           return result
+        },
+      },
+      {
+        id: 'notify',
+        effect: true,
+        run: async (ctx) => {
+          const result = ctx.outputs.monitor as { alert?: { subject: string; body: string } }
+          if (!result.alert) return { delivered: false }
+          const deps = await resolveClientDeps(source, ctx.clientId)
+          await deps.notify(ctx.clientId, result.alert.subject, result.alert.body)
+          return { delivered: true }
         },
       },
     ],

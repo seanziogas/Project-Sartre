@@ -58,6 +58,7 @@ export function buildDeanonPipeline(source: ClientDeps<DeanonDeps>): PipelineDef
       },
       {
         id: 'persist',
+        effect: true,
         run: async (ctx) => {
           const deps = await resolveClientDeps(source, ctx.clientId)
           const { signals } = ctx.outputs.prepare as PreparedDeanonReview

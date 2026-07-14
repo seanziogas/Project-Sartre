@@ -74,6 +74,7 @@ export function buildReactivationPipeline(source: ClientDeps<ReactivationDeps>):
       },
       {
         id: 'enroll',
+        effect: true,
         run: async (ctx) => {
           const deps = await resolveClientDeps(source, ctx.clientId)
           const campaign = ctx.outputs.draft as campaignFactory.CampaignResult

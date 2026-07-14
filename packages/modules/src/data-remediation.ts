@@ -91,6 +91,7 @@ export function buildRemediationPipeline(source: ClientDeps<RemediationDeps>): P
       },
       {
         id: 'write',
+        effect: true,
         run: async (ctx) => {
           const deps = await resolveClientDeps(source, ctx.clientId)
           const prepared = ctx.outputs.prepare as PartitionedRemediation

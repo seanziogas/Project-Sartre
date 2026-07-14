@@ -135,6 +135,7 @@ export function buildLearningLoopPipeline(source: ClientDeps<LearningLoopDeps>):
       },
       {
         id: 'persist',
+        effect: true,
         run: async (ctx) => {
           const deps = await resolveClientDeps(source, ctx.clientId)
           const { drafts } = ctx.outputs.prepare as LearningReview

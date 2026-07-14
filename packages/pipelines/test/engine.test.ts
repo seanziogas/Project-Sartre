@@ -41,6 +41,33 @@ describe('PipelineEngine', () => {
     expect(run.journal.map((j) => j.event)).toContain('run_completed')
   })
 
+  it('routes declared effects through the durable ledger with a run-scoped idempotency key', async () => {
+    const calls: Array<{ clientId: string; key: string; payload: unknown }> = []
+    let performed = 0
+    const engine = new PipelineEngine(new MemoryRunStore(), {
+      now: NOW,
+      runId: 'effect-r1',
+      effects: {
+        execute: async (clientId, key, payload, perform) => {
+          calls.push({ clientId, key, payload })
+          return perform()
+        },
+      },
+    })
+    const run = await engine.start(pipeline([
+      { id: 'prepare', run: async () => ({ id: 'A1' }) },
+      { id: 'write', effect: true, run: async () => { performed++; return { written: 1 } } },
+    ]), manifestWith(() => {}), 'Acme')
+
+    expect(run.status).toBe('completed')
+    expect(performed).toBe(1)
+    expect(calls).toEqual([{
+      clientId: 'Acme',
+      key: 'effect-r1:write',
+      payload: { pipelineId: 'test-pipeline@0.1.0', stepId: 'write', inputs: { prepare: { id: 'A1' } } },
+    }])
+  })
+
   it('never starts a run whose module fails the MVD gate', async () => {
     const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW })
     const manifest = manifestWith((m) => {

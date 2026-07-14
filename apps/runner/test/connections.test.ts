@@ -44,7 +44,7 @@ describe('TenantConnectionResolver', () => {
     }
     const resolver = new TenantConnectionResolver(storeWith(connection) as never)
     expect(await resolver.list('Acme')).toHaveLength(1)
-    await expect(resolver.resolve('Acme', 'connection-1')).rejects.toThrow('SARTRE_CREDENTIAL_ENCRYPTION_KEY')
+    await expect(resolver.resolve('Acme', 'connection-1')).rejects.toThrow('credential encryption keyring')
   })
 
   it('constructs provider clients from only the current tenant connection', async () => {

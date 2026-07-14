@@ -838,7 +838,7 @@ describe('inbound routing pipeline', () => {
     const done = await engine.resolveGate(pipeline, 'r1', 'writeback:crm_write', 'approved', 'gtme@kiln', m)
     expect(done.status).toBe('completed')
     expect(written).toHaveLength(1)
-    expect((done.checkpoints.writeback as { written: number }).written).toBe(1)
+    expect((done.checkpoints.commit as { written: number }).written).toBe(1)
   })
 
   it('honors a zero-credit cap before calling the provider', async () => {

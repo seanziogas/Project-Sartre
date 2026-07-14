@@ -76,7 +76,6 @@ export function buildInboundRoutingPipeline(source: ClientDeps<InboundRoutingDep
       {
         id: 'writeback',
         run: async (ctx) => {
-          const deps = await resolveClientDeps(source, ctx.clientId)
           const { assigned, manualReview, skipped } = ctx.outputs.route as {
             assigned: router.RoutingDecision[]
             manualReview: router.RoutingDecision[]
@@ -88,8 +87,17 @@ export function buildInboundRoutingPipeline(source: ClientDeps<InboundRoutingDep
             manualReview: manualReview.map((d) => ({ id: d.id, reasoning: d.reasoning })),
             skippedCount: skipped.length,
           })
-          const written = await deps.writeAssignments(assignments)
-          return { written, manualReview: manualReview.length, skipped: skipped.length }
+          return { assignments, manualReview: manualReview.length, skipped: skipped.length }
+        },
+      },
+      {
+        id: 'commit',
+        effect: true,
+        run: async (ctx) => {
+          const deps = await resolveClientDeps(source, ctx.clientId)
+          const prepared = ctx.outputs.writeback as { assignments: Array<{ id: string; owner: string; reasoning: string }>; manualReview: number; skipped: number }
+          const written = await deps.writeAssignments(prepared.assignments)
+          return { written, manualReview: prepared.manualReview, skipped: prepared.skipped }
         },
       },
     ],

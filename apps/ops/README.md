@@ -1,6 +1,6 @@
 # Portal configuration
 
-The Phase 4 portal serves pod members and explicitly granted client users. It reads git-backed manifests and approved Brain documents plus file-backed health reports; run state, gate decisions, and Layer-8 feedback live in Postgres.
+The Phase 4 portal serves pod members and explicitly granted client users. It reads git-backed manifests and approved Brain documents; run state, current MVD/health artifacts, gate decisions, and Layer-8 feedback live in Postgres. A file-backed health-report fallback remains only for upgraded v1 deployments.
 
 Required environment:
 
@@ -12,6 +12,8 @@ Required environment:
 - `ANTHROPIC_API_KEY` — required only for Brain copilot requests. The copilot is locked to `claude-opus-4-8` through `AnthropicLlmClient`.
 - `SARTRE_CREDENTIAL_ENCRYPTION_KEY` — 32 random bytes encoded as base64; required only to create, rotate, test, or use client-owned tool connections.
 - `SARTRE_PUBLIC_BASE_URL` — public HTTPS origin used to construct provider OAuth callbacks.
+
+`GET /api/health` is the deployment readiness probe and returns unavailable when Postgres cannot be reached.
 
 Both apps run the idempotent `@sartre/db` migration at startup. The ops app records gate decisions; it never resumes runs. The runner polls the shared Postgres store and calls `engine.resume()` after all gates are resolved.
 

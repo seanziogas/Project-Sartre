@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import type { ZodType } from 'zod'
 import type {
   AudienceSyncClient, CachedField, CrmReader, CrmWriter, InboundReader, IntentReader, LeadConverter,
   NamespacedWrite, SequenceLead, SequencerClient, StagedBatch, WarehouseClient,
@@ -6,7 +6,7 @@ import type {
 import { EnrichmentCache, IntentEvent } from '@sartre/connectors'
 import type { Account, Contact, MvdStatus, Signal } from '@sartre/core'
 import { CanonicalIngestionCoordinator } from '@sartre/data'
-import type { DataHealthReport, LeadCandidate, SourceMapping } from '@sartre/data'
+import type { DataHealthReport, LeadCandidate } from '@sartre/data'
 import {
   PostgresCacheStore, PostgresCanonicalStore, PostgresFeedbackLog, PostgresRuntimeArtifactStore,
   PostgresStagingStore,
@@ -18,22 +18,14 @@ import type {
   TakeoutPlay,
 } from '@sartre/modules'
 import { campaignFactory, router, signalWatcher } from '@sartre/skills'
+import { evaluateOptimizationDraft, evaluateTuningProposal } from '@sartre/learning'
 import type { SequenceEnrollmentReceipt } from '@sartre/connectors'
 import type { RunnerDeploymentContext } from './deployment.js'
 import type { RunnerModuleDeps } from './registry.js'
-
-interface StandardRuntimeConfig {
-  connections: Record<string, string>
-  destinations: Record<string, string>
-  costs: Record<string, number>
-  modules: Record<string, unknown>
-}
-const StandardRuntimeConfig: z.ZodType<StandardRuntimeConfig> = z.object({
-  connections: z.record(z.string(), z.string()),
-  destinations: z.record(z.string(), z.string()),
-  costs: z.record(z.string(), z.number().finite().nonnegative()),
-  modules: z.record(z.string(), z.unknown()),
-})
+import {
+  StandardInputSchemas, StandardModuleConfigSchemas, StandardRuntimeConfigSchema,
+} from './standard-schemas.js'
+import type { StandardRuntimeConfig } from './standard-schemas.js'
 
 /**
  * First-party deployment bundle. Inputs that are engagement-specific enter as
@@ -47,20 +39,20 @@ export function createStandardModuleDeps(context: RunnerDeploymentContext): Runn
   const staging = new PostgresStagingStore(context.db)
   const cache = new EnrichmentCache(new PostgresCacheStore(context.db))
 
-  const config = (clientId: string) => context.brains.loadApprovedConfig(clientId, 'standard-runtime.yaml', StandardRuntimeConfig)
-  const input = async <T>(clientId: string, moduleId: string): Promise<T> => {
-    const value = await artifacts.get<T>(clientId, `standard-input:${moduleId}`)
+  const config = (clientId: string) => context.brains.loadApprovedConfig(clientId, 'standard-runtime.yaml', StandardRuntimeConfigSchema)
+  const input = async <T>(clientId: string, moduleId: string, schema: ZodType<T>): Promise<T> => {
+    const value = await artifacts.get<unknown>(clientId, `standard-input:${moduleId}`)
     if (value === null) throw new Error(`${moduleId} requires tenant runtime artifact standard-input:${moduleId}`)
-    return value
+    return schema.parse(value)
   }
   const publish = async (clientId: string, moduleId: string, value: unknown): Promise<DispatchReceipt> => {
     await artifacts.put(clientId, `standard-output:${moduleId}`, value)
     return { affected: Array.isArray(value) ? value.length : 1, detail: `stored reviewed ${moduleId} output` }
   }
-  const moduleConfig = <T>(runtime: StandardRuntimeConfig, moduleId: string): T => {
+  const moduleConfig = <T>(runtime: StandardRuntimeConfig, moduleId: string, schema: ZodType<T>): T => {
     const value = runtime.modules[moduleId]
     if (!value || typeof value !== 'object') throw new Error(`${moduleId} requires approved standard-runtime module config`)
-    return value as T
+    return schema.parse(value)
   }
   const connection = (runtime: StandardRuntimeConfig, name: string): string => {
     const value = runtime.connections[name]
@@ -78,7 +70,7 @@ export function createStandardModuleDeps(context: RunnerDeploymentContext): Runn
     const runtime = await config(clientId)
     const provider = connection(runtime, 'crm')
     if (provider !== 'salesforce' && provider !== 'hubspot' && provider !== 'attio') throw new Error('standard CRM writes require salesforce, hubspot, or attio')
-    const settings = moduleConfig<{ namespacePrefix: string }>(runtime, 'crm')
+    const settings = moduleConfig(runtime, 'crm', StandardModuleConfigSchemas.crm)
     return context.tools.crm(clientId, provider, settings.namespacePrefix)
   }
   const sequencer = async (clientId: string): Promise<SequencerClient> => {
@@ -92,7 +84,7 @@ export function createStandardModuleDeps(context: RunnerDeploymentContext): Runn
     return await crm(clientId) as CrmReader & CrmWriter & LeadConverter
   }
   const enroll = async (clientId: string, campaignId: string, ids: string[]): Promise<DispatchReceipt> => {
-    const leads = await input<Record<string, SequenceLead>>(clientId, 'sequence-leads')
+    const leads = await input(clientId, 'sequence-leads', StandardInputSchemas['sequence-leads'])
     const selected = ids.map((id) => leads[id]).filter((lead): lead is SequenceLead => lead !== undefined)
     if (selected.length !== ids.length) throw new Error(`sequence-leads artifact is missing ${ids.length - selected.length} reviewed row(s)`)
     const receipt: SequenceEnrollmentReceipt = await (await sequencer(clientId)).enroll(campaignId, selected)
@@ -131,7 +123,7 @@ export function createStandardModuleDeps(context: RunnerDeploymentContext): Runn
   return {
     enrichment: async (clientId) => {
       const runtime = await config(clientId)
-      const cfg = moduleConfig<{ accountMapping: SourceMapping; contactMapping: SourceMapping; opportunityMapping?: SourceMapping; activityMapping?: SourceMapping }>(runtime, 'revops.enrichment')
+      const cfg = moduleConfig(runtime, 'revops.enrichment', StandardModuleConfigSchemas['revops.enrichment'])
       const reader = await crm(clientId)
       return {
         refreshCanonical: async () => {
@@ -153,7 +145,7 @@ export function createStandardModuleDeps(context: RunnerDeploymentContext): Runn
     },
     reactivation: async (clientId) => {
       const runtime = await config(clientId)
-      const cfg = moduleConfig<{ vocabularies: Record<string, string[]>; reviewerRules: string[]; minScore: number; defaultPlay: string; defaultGroup: string; campaignId: string; templates: campaignFactory.CampaignTemplates }>(runtime, 'sales.reactivation')
+      const cfg = moduleConfig(runtime, 'sales.reactivation', StandardModuleConfigSchemas['sales.reactivation'])
       const brainContext = await context.brains.loadContext(clientId, ['icp.md', 'grading.md', 'use-cases.md'])
       return {
         loadCanonicalClosedLost: (id) => canonical.closedLostRows(id),
@@ -166,20 +158,20 @@ export function createStandardModuleDeps(context: RunnerDeploymentContext): Runn
     },
     inbound: async (clientId) => {
       const runtime = await config(clientId)
-      const cfg = moduleConfig<{ provider: 'qualified' | 'linkedin-leadgen' | 'typeform' | 'chilipiper' | 'marketo'; idField: string; domainField: string; nameField: string; fieldsWanted: string[]; clayCreditsPerCall: number; routingRules: router.RoutingRules; ownerField: string; reasoningField: string }>(runtime, 'marketing.inbound')
+      const cfg = moduleConfig(runtime, 'marketing.inbound', StandardModuleConfigSchemas['marketing.inbound'])
       const source: InboundReader = cfg.provider === 'marketo' ? await context.tools.marketingAutomation(clientId) : await context.tools.inbound(clientId, cfg.provider)
       const enrichment = await context.tools.enrichment(clientId)
       return {
-        pullNewLeads: async () => (await source.pullLeads()).rows.map((row) => ({ id: String(row[cfg.idField] ?? ''), domain: String(row[cfg.domainField] ?? '') || null, name: String(row[cfg.nameField] ?? '') || null, raw: scalarRecord(row) })),
+        pullNewLeads: async () => (await collectStaged(source, 'pullLeads')).rows.map((row) => ({ id: String(row[cfg.idField] ?? ''), domain: String(row[cfg.domainField] ?? '') || null, name: String(row[cfg.nameField] ?? '') || null, raw: scalarRecord(row) })),
         enrichment: { cache, provider: async (domain) => Object.fromEntries(Object.entries(await enrichment.enrich(domain, cfg.fieldsWanted)).map(([field, value]) => [field, { value, provenance: { source: 'enrichment', origin: 'clay', retrievedAt: new Date().toISOString(), confidence: 'medium' } } satisfies CachedField])) }, fieldsWanted: cfg.fieldsWanted,
-        clayCreditsPerProviderCall: cfg.clayCreditsPerCall, routingRules: cfg.routingRules,
+        clayCreditsPerProviderCall: cfg.clayCreditsPerCall, routingRules: cfg.routingRules as router.RoutingRules,
         toRoutingFields: (lead, enriched) => ({ ...lead.raw, ...Object.fromEntries(Object.entries(enriched.values).map(([field, value]) => [field, value?.value ?? null])) }),
         writeAssignments: async (assignments) => (await namespacedWrites(clientId, assignments.map((item) => ({ object: 'contact', externalId: item.id, fields: { [cfg.ownerField]: item.owner, [cfg.reasoningField]: item.reasoning } })))).affected,
       }
     },
     remediation: async (clientId) => ({
       loadHealthReport: async (id) => required(await artifacts.get<DataHealthReport>(id, 'health-report'), 'health-report'),
-      prepareWrites: async (id) => ({ writes: await input<NamespacedWrite[]>(id, 'revops.remediation') }), crm: await crm(clientId),
+      prepareWrites: async (id) => ({ writes: await input(id, 'revops.remediation', StandardInputSchemas['revops.remediation']) }), crm: await crm(clientId),
     }),
     copilotBriefs: async (clientId) => ({
       loadBriefInputs: async (id) => {
@@ -190,42 +182,42 @@ export function createStandardModuleDeps(context: RunnerDeploymentContext): Runn
       publishBriefs: async (id, briefs) => (await publish(id, 'sales.copilot-briefs', briefs)).affected,
     }),
     dedup: async (clientId) => {
-      const cfg = moduleConfig<{ flagField: string }>(await config(clientId), 'revops.dedup')
+      const cfg = moduleConfig(await config(clientId), 'revops.dedup', StandardModuleConfigSchemas['revops.dedup'])
       return { loadDuplicateGroups: (id) => canonical.duplicateReviewGroups(id), prepareAnnotationWrites: async (_id, groups) => groups.flatMap((group) => group.members.flatMap((member) => Object.values(member.externalIds).map((externalId) => ({ object: group.recordType, externalId, fields: { [cfg.flagField]: group.id } })))), crm: await crm(clientId) }
     },
     leadConvert: async (clientId) => ({
       sourceSystem: 'salesforce',
-      loadConversionInput: async (id) => ({ leads: await input<LeadCandidate[]>(id, 'revops.lead-convert'), accounts: await canonical.listAll(id, 'account') as Account[], contacts: await canonical.listAll(id, 'contact') as Contact[] }),
+      loadConversionInput: async (id) => ({ leads: await input(id, 'revops.lead-convert', StandardInputSchemas['revops.lead-convert'] as ZodType<LeadCandidate[]>), accounts: await canonical.listAll(id, 'account') as Account[], contacts: await canonical.listAll(id, 'contact') as Contact[] }),
       converter: await leadConverter(clientId),
     }),
     deanon: async (clientId) => {
       const runtime = await config(clientId)
-      const cfg = moduleConfig<{ provider: 'sixsense' | 'g2' | 'clearbit' | 'koala' | 'bombora'; idField: string; domainField: string; kindField: string; occurredAtField: string; detailField: string }>(runtime, 'marketing.deanon')
+      const cfg = moduleConfig(runtime, 'marketing.deanon', StandardModuleConfigSchemas['marketing.deanon'])
       const source: IntentReader = await context.tools.intent(clientId, cfg.provider)
-      return { sourceSystem: cfg.provider, loadDeanonInput: async (id) => ({ events: (await source.pullSignals()).rows.map((row) => IntentEvent.parse({ clientId: id, sourceSystem: cfg.provider, externalId: String(row[cfg.idField] ?? ''), companyDomain: row[cfg.domainField] ?? null, companyName: null, kind: String(row[cfg.kindField] ?? 'intent'), occurredAt: String(row[cfg.occurredAtField] ?? new Date().toISOString()), detail: String(row[cfg.detailField] ?? '') })), accounts: await canonical.listAll(id, 'account') as Account[] }), persistSignals: async (id, signals) => (await canonical.putSignals(id, signals)).length }
+      return { sourceSystem: cfg.provider, loadDeanonInput: async (id) => ({ events: (await collectStaged(source, 'pullSignals')).rows.map((row) => IntentEvent.parse({ clientId: id, sourceSystem: cfg.provider, externalId: String(row[cfg.idField] ?? ''), companyDomain: row[cfg.domainField] ?? null, companyName: null, kind: String(row[cfg.kindField] ?? 'intent'), occurredAt: String(row[cfg.occurredAtField] ?? new Date().toISOString()), detail: String(row[cfg.detailField] ?? '') })), accounts: await canonical.listAll(id, 'account') as Account[] }), persistSignals: async (id, signals) => (await canonical.putSignals(id, signals)).length }
     },
     learning: async (clientId) => ({
-      loadFeedback: (id) => feedback.list(id), evaluateProposal: async () => ({ pass: false, detail: 'standard adapter fails closed until a deployment known-answer evaluator is configured' }),
-      loadOptimizationInput: (id) => input<OptimizationInput>(id, 'platform.learning'), evaluateOptimizationDraft: async () => ({ pass: false, detail: 'standard adapter fails closed until a deployment optimization evaluator is configured' }),
+      loadFeedback: (id) => feedback.list(id), evaluateProposal: async (_id, proposal) => evaluateTuningProposal(proposal),
+      loadOptimizationInput: (id) => input(id, 'platform.learning', StandardInputSchemas['platform.learning'] as ZodType<OptimizationInput>), evaluateOptimizationDraft: async (_id, draft) => evaluateOptimizationDraft(draft),
       persistDrafts: async (id, drafts) => (await publish(id, 'platform.learning', drafts)).affected,
     }),
     quality: async () => ({ loadReports: async (id) => ({ current: required(await artifacts.get<DataHealthReport>(id, 'health-report'), 'health-report'), previous: await artifacts.get<DataHealthReport>(id, 'previous-health-report') }), saveMvd: (id, mvd) => artifacts.put(id, 'mvd', mvd), notify }),
     outbound: async (clientId) => {
-      const cfg = moduleConfig<{ templates: campaignFactory.CampaignTemplates; campaignId: string }>(await config(clientId), 'sales.outbound')
-      return { loadCandidates: (id) => input<OutboundInput>(id, 'sales.outbound'), templates: cfg.templates, enroll: async (id, rows) => enroll(id, cfg.campaignId, rows.map((row) => row.id)) }
+      const cfg = moduleConfig(await config(clientId), 'sales.outbound', StandardModuleConfigSchemas['sales.outbound'])
+      return { loadCandidates: (id) => input(id, 'sales.outbound', StandardInputSchemas['sales.outbound'] as ZodType<OutboundInput>), templates: cfg.templates, enroll: async (id, rows) => enroll(id, cfg.campaignId, rows.map((row) => row.id)) }
     },
-    abm: async () => ({ loadAccounts: (id) => input<AbmInput>(id, 'sales.abm'), planAccount: (_id, account) => ({ accountId: account.id, accountName: account.name, play: String(account.fields.play ?? 'account-review'), rationale: String(account.fields.rationale ?? 'approved account selection'), contacts: Array.isArray(account.fields.contacts) ? account.fields.contacts.map(String) : [] }), activate: (id, plays) => publish(id, 'sales.abm', plays) }),
-    takeout: async () => ({ loadCandidates: (id) => input<TakeoutCandidate[]>(id, 'sales.takeout'), preparePlay: (_id, candidate) => ({ ...candidate, angle: candidate.evidence[0] ?? 'competitive displacement', proof: candidate.evidence.join('; '), draft: `Competitive takeout: ${candidate.competitor}` }), activate: (id, plays) => publish(id, 'sales.takeout', plays) }),
-    repWorkflows: async (clientId) => ({ loadWork: (id) => input<RepWorkflowInput>(id, 'sales.rep-workflows'), brainContext: (id) => context.brains.loadContext(id, ['company.md', 'voice.md', 'use-cases.md']), tokenUsdPerReply: cost(await config(clientId), 'replyUsd', 0.02), executeApproved: (id, plan) => publish(id, 'sales.rep-workflows', plan) }),
-    events: async () => ({ loadAttendees: (id) => input<EventAttendee[]>(id, 'marketing.events'), draftFollowup: (_id, attendee) => attendee.email ? { attendeeId: attendee.id, email: attendee.email, event: attendee.event, play: attendee.attended ? 'attendee' : 'no-show', draft: `Follow up regarding ${attendee.event}` } : null, send: sendEventFollowups }),
-    copyFactory: async (clientId) => { const cfg = moduleConfig<{ templates: campaignFactory.CampaignTemplates }>(await config(clientId), 'marketing.copy-factory'); return { loadBrief: (id) => input<CopyFactoryInput>(id, 'marketing.copy-factory'), templates: cfg.templates, publishDrafts: (id, campaign) => publish(id, 'marketing.copy-factory', campaign) } },
-    adsSync: async (clientId) => { const runtime = await config(clientId); const provider = connection(runtime, 'audience'); if (!['linkedin-ads', 'google-ads', 'meta-ads'].includes(provider)) throw new Error(`unsupported standard audience provider ${provider}`); const audience = await context.tools.audience(clientId, provider as Parameters<typeof context.tools.audience>[1]); return { loadMutations: (id) => input<AudienceMutation[]>(id, 'marketing.ads-sync'), sync: async (_id, mutations) => combineReceipts(await Promise.all(mutations.map((mutation) => audience.syncEmails(mutation.audience, mutation.add, mutation.remove)))) } },
-    routing: async (clientId) => { const cfg = moduleConfig<{ rules: router.RoutingRules; ownerField: string; reasoningField: string }>(await config(clientId), 'revops.routing'); return { loadRecords: (id) => input<RoutingInput>(id, 'revops.routing'), rules: cfg.rules, writeAssignments: (id, decisions) => namespacedWrites(id, decisions.map((decision) => ({ object: 'contact', externalId: decision.id, fields: { [cfg.ownerField]: decision.owner, [cfg.reasoningField]: decision.reasoning } }))) } },
-    tam: async (clientId) => { const cfg = moduleConfig<{ scoreField: string; tierField: string; defaultScore: number; defaultTier: string }>(await config(clientId), 'revops.tam'); return { loadAccounts: (id) => input<TamAccount[]>(id, 'revops.tam'), score: (_id, account) => ({ accountId: account.id, score: Number(account.fields.score ?? cfg.defaultScore), tier: String(account.fields.tier ?? cfg.defaultTier), reasons: ['approved standard-runtime scoring inputs'], plays: [] }), writeScores: (id, scores) => namespacedWrites(id, scores.map((score) => ({ object: 'account', externalId: score.accountId, fields: { [cfg.scoreField]: score.score, [cfg.tierField]: score.tier } }))) } },
-    etl: async (clientId) => { const runtime = await config(clientId); const provider = connection(runtime, 'warehouse'); if (!['snowflake', 'bigquery', 'databricks', 'redshift'].includes(provider)) throw new Error(`unsupported standard warehouse ${provider}`); const warehouse: WarehouseClient = await context.tools.warehouse(clientId, provider as Parameters<typeof context.tools.warehouse>[1]); return { loadChanges: (id) => input<EtlChange[]>(id, 'revops.etl'), validate: async (_id, changes) => ({ valid: changes.filter((change) => typeof change.fields.sql === 'string'), rejected: changes.filter((change) => typeof change.fields.sql !== 'string').map((change) => ({ change, reason: 'fields.sql is required' })) }), write: async (_id, changes) => combineReceipts(await Promise.all(changes.map(async (change) => warehouse.execute(String(change.fields.sql), scalarRecord(change.fields.bindings && typeof change.fields.bindings === 'object' ? change.fields.bindings as Record<string, unknown> : {})))) ) } },
-    signals: async (clientId) => { const cfg = moduleConfig<{ rules: signalWatcher.SignalRule[] }>(await config(clientId), 'platform.signals'); return { loadSignals: (id) => input(id, 'platform.signals'), rules: cfg.rules, persistTriggers: (id, matches) => publish(id, 'platform.signals', matches) } },
-    digests: async () => ({ loadDigest: (id) => input<Digest>(id, 'platform.digests'), deliver: async (id, digest) => { await notify(id, digest.title, digest.markdown); return { affected: 1 } } }),
-    metrics: async (clientId) => ({ loadMetrics: (id) => input<MetricsInput>(id, 'platform.metrics'), tokenUsdPerReport: cost(await config(clientId), 'metricsReportUsd', 0.08), publish: async (id, report) => { const receipt = await publish(id, 'platform.metrics', report); await notify(id, report.title, report.markdown); return receipt } }),
+    abm: async () => ({ loadAccounts: (id) => input(id, 'sales.abm', StandardInputSchemas['sales.abm']), planAccount: (_id, account) => ({ accountId: account.id, accountName: account.name, play: String(account.fields.play ?? 'account-review'), rationale: String(account.fields.rationale ?? 'approved account selection'), contacts: Array.isArray(account.fields.contacts) ? account.fields.contacts.map(String) : [] }), activate: (id, plays) => publish(id, 'sales.abm', plays) }),
+    takeout: async () => ({ loadCandidates: (id) => input(id, 'sales.takeout', StandardInputSchemas['sales.takeout']), preparePlay: (_id, candidate) => ({ ...candidate, angle: candidate.evidence[0] ?? 'competitive displacement', proof: candidate.evidence.join('; '), draft: `Competitive takeout: ${candidate.competitor}` }), activate: (id, plays) => publish(id, 'sales.takeout', plays) }),
+    repWorkflows: async (clientId) => ({ loadWork: (id) => input(id, 'sales.rep-workflows', StandardInputSchemas['sales.rep-workflows']), brainContext: (id) => context.brains.loadContext(id, ['company.md', 'voice.md', 'use-cases.md']), tokenUsdPerReply: cost(await config(clientId), 'replyUsd', 0.02), executeApproved: (id, plan) => publish(id, 'sales.rep-workflows', plan) }),
+    events: async () => ({ loadAttendees: (id) => input(id, 'marketing.events', StandardInputSchemas['marketing.events']), draftFollowup: (_id, attendee) => attendee.email ? { attendeeId: attendee.id, email: attendee.email, event: attendee.event, play: attendee.attended ? 'attendee' : 'no-show', draft: `Follow up regarding ${attendee.event}` } : null, send: sendEventFollowups }),
+    copyFactory: async (clientId) => { const cfg = moduleConfig(await config(clientId), 'marketing.copy-factory', StandardModuleConfigSchemas['marketing.copy-factory']); return { loadBrief: (id) => input(id, 'marketing.copy-factory', StandardInputSchemas['marketing.copy-factory'] as ZodType<CopyFactoryInput>), templates: cfg.templates, publishDrafts: (id, campaign) => publish(id, 'marketing.copy-factory', campaign) } },
+    adsSync: async (clientId) => { const runtime = await config(clientId); const provider = connection(runtime, 'audience'); if (!['linkedin-ads', 'google-ads', 'meta-ads'].includes(provider)) throw new Error(`unsupported standard audience provider ${provider}`); const audience = await context.tools.audience(clientId, provider as Parameters<typeof context.tools.audience>[1]); return { loadMutations: (id) => input(id, 'marketing.ads-sync', StandardInputSchemas['marketing.ads-sync']), sync: async (_id, mutations) => combineReceipts(await Promise.all(mutations.map((mutation) => audience.syncEmails(mutation.audience, mutation.add, mutation.remove)))) } },
+    routing: async (clientId) => { const cfg = moduleConfig(await config(clientId), 'revops.routing', StandardModuleConfigSchemas['revops.routing']); return { loadRecords: (id) => input(id, 'revops.routing', StandardInputSchemas['revops.routing']), rules: cfg.rules as router.RoutingRules, writeAssignments: (id, decisions) => namespacedWrites(id, decisions.map((decision) => ({ object: 'contact', externalId: decision.id, fields: { [cfg.ownerField]: decision.owner, [cfg.reasoningField]: decision.reasoning } }))) } },
+    tam: async (clientId) => { const cfg = moduleConfig(await config(clientId), 'revops.tam', StandardModuleConfigSchemas['revops.tam']); return { loadAccounts: (id) => input(id, 'revops.tam', StandardInputSchemas['revops.tam']), score: (_id, account) => ({ accountId: account.id, score: Number(account.fields.score ?? cfg.defaultScore), tier: String(account.fields.tier ?? cfg.defaultTier), reasons: ['approved standard-runtime scoring inputs'], plays: [] }), writeScores: (id, scores) => namespacedWrites(id, scores.map((score) => ({ object: 'account', externalId: score.accountId, fields: { [cfg.scoreField]: score.score, [cfg.tierField]: score.tier } }))) } },
+    etl: async (clientId) => { const runtime = await config(clientId); const provider = connection(runtime, 'warehouse'); if (!['snowflake', 'bigquery', 'databricks', 'redshift'].includes(provider)) throw new Error(`unsupported standard warehouse ${provider}`); const warehouse: WarehouseClient = await context.tools.warehouse(clientId, provider as Parameters<typeof context.tools.warehouse>[1]); return { loadChanges: (id) => input(id, 'revops.etl', StandardInputSchemas['revops.etl']), validate: async (_id, changes) => ({ valid: changes.filter((change) => typeof change.fields.sql === 'string'), rejected: changes.filter((change) => typeof change.fields.sql !== 'string').map((change) => ({ change, reason: 'fields.sql is required' })) }), write: async (_id, changes) => combineReceipts(await Promise.all(changes.map(async (change) => warehouse.execute(String(change.fields.sql), scalarRecord(change.fields.bindings && typeof change.fields.bindings === 'object' ? change.fields.bindings as Record<string, unknown> : {})))) ) } },
+    signals: async (clientId) => { const cfg = moduleConfig(await config(clientId), 'platform.signals', StandardModuleConfigSchemas['platform.signals']); return { loadSignals: (id) => input(id, 'platform.signals', StandardInputSchemas['platform.signals']), rules: cfg.rules, persistTriggers: (id, matches) => publish(id, 'platform.signals', matches) } },
+    digests: async () => ({ loadDigest: (id) => input(id, 'platform.digests', StandardInputSchemas['platform.digests']), deliver: async (id, digest) => { await notify(id, digest.title, digest.markdown); return { affected: 1 } } }),
+    metrics: async (clientId) => ({ loadMetrics: (id) => input(id, 'platform.metrics', StandardInputSchemas['platform.metrics']), tokenUsdPerReport: cost(await config(clientId), 'metricsReportUsd', 0.08), publish: async (id, report) => { const receipt = await publish(id, 'platform.metrics', report); await notify(id, report.title, report.markdown); return receipt } }),
   }
 }
 
@@ -235,6 +227,22 @@ async function collect(reader: CrmReader, method: 'pullAccounts' | 'pullContacts
   const all: Record<string, unknown>[] = []
   for (let page = 0; page < 100; page++) {
     const batch = await reader[method](cursor)
+    first ??= batch
+    all.push(...batch.rows)
+    if (!batch.cursor) return { ...first, cursor: null, rows: all }
+    cursor = batch.cursor
+  }
+  throw new Error(`${method} exceeded 100 pages`)
+}
+
+async function collectStaged(reader: InboundReader | IntentReader, method: 'pullLeads' | 'pullSignals'): Promise<StagedBatch> {
+  let cursor: string | undefined
+  let first: StagedBatch | null = null
+  const all: Record<string, unknown>[] = []
+  for (let page = 0; page < 100; page++) {
+    const batch = method === 'pullLeads'
+      ? await (reader as InboundReader).pullLeads(cursor)
+      : await (reader as IntentReader).pullSignals(cursor)
     first ??= batch
     all.push(...batch.rows)
     if (!batch.cursor) return { ...first, cursor: null, rows: all }

@@ -6,6 +6,7 @@ import {
 } from '../src/expanded-providers.js'
 import { PROVIDER_CATALOG, validateProviderCredentials } from '../src/catalog.js'
 import { createProviderClient } from '../src/providers.js'
+import { OAUTH_PROVIDERS } from '../src/oauth.js'
 
 class ScriptedHttp implements HttpTransport {
   requests: HttpRequest[] = []
@@ -25,6 +26,8 @@ describe('expanded mainstream providers', () => {
     expect(() => validateProviderCredentials('fireflies', { apiKey: 'x' }, 'oauth')).toThrow('does not support oauth')
     expect(validateProviderCredentials('fathom', { apiKey: 'x' }, 'api_key')).toBe('fathom')
     expect(() => validateProviderCredentials('gong', { baseUrl: 'https://x.api.gong.io' }, 'api_key')).toThrow('accessKey/accessKeySecret')
+    expect(PROVIDER_CATALOG.filter((provider) => (provider.auth as readonly string[]).includes('oauth')).map((provider) => provider.id).sort())
+      .toEqual([...OAUTH_PROVIDERS].sort())
   })
 
   it('constructs every catalog provider through the central factory', () => {
@@ -55,9 +58,19 @@ describe('expanded mainstream providers', () => {
 
   it('stages Marketo leads from only the configured list', async () => {
     const http = new ScriptedHttp([{ result: [{ id: 7 }], moreResult: true, nextPageToken: 'next' }])
-    const client = new MarketoClient('https://123-ABC-456.mktorest.com', 'fake', '42', http)
+    const client = new MarketoClient({ instanceUrl: 'https://123-ABC-456.mktorest.com', accessToken: 'fake', listId: '42' }, http)
     expect(await client.pullLeads()).toMatchObject({ object: 'lead', cursor: 'next', rows: [{ id: 7 }] })
     expect(http.requests[0]!.url).toContain('/list/42/leads.json')
+  })
+
+  it('obtains and reuses Marketo two-legged OAuth tokens without putting secrets in URLs', async () => {
+    const http = new ScriptedHttp([{ access_token: 'generated', expires_in: 3600 }, { success: true, result: [] }, { success: true, result: [] }])
+    const client = new MarketoClient({ instanceUrl: 'https://123-ABC-456.mktorest.com', clientId: 'client', clientSecret: 'secret', listId: '42' }, http)
+    await client.pullLeads()
+    await client.pullLeads()
+    expect(http.requests[0]).toMatchObject({ method: 'POST', url: 'https://123-abc-456.mktorest.com/identity/oauth/token' })
+    expect(http.requests[0]!.body).toContain('client_secret=secret')
+    expect(http.requests.slice(1).every((request) => request.headers?.Authorization === 'Bearer generated')).toBe(true)
   })
 
   it('hashes Google and Meta audience emails locally', async () => {

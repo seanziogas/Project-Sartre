@@ -28,6 +28,24 @@ describe('provider OAuth', () => {
     expect(() => oauthAuthorizationUrl('dynamics', {
       clientId: 'client', redirectUri: 'https://sartre.example/callback', state: 'signed-state', instanceUrl: 'https://attacker.example',
     })).toThrow('dynamics.com')
+    const snowflake = new URL(oauthAuthorizationUrl('snowflake', { clientId: 'client', redirectUri: 'https://sartre.example/callback', state: 'signed-state', accountUrl: 'https://acme.snowflakecomputing.com' }))
+    expect(snowflake.origin + snowflake.pathname).toBe('https://acme.snowflakecomputing.com/oauth/authorize')
+    const databricks = new URL(oauthAuthorizationUrl('databricks', { clientId: 'client', redirectUri: 'https://sartre.example/callback', state: 'signed-state', workspaceUrl: 'https://acme.cloud.databricks.com' }))
+    expect(databricks.pathname).toBe('/oidc/v1/authorize')
+    expect(() => oauthAuthorizationUrl('snowflake', { clientId: 'client', redirectUri: 'https://sartre.example/callback', state: 'state', accountUrl: 'https://attacker.example' })).toThrow('approved HTTPS provider host')
+  })
+
+  it('exchanges Gong authorization codes with Basic client authentication and captures the tenant API host', async () => {
+    let request: HttpRequest | undefined
+    const credentials = await exchangeOAuthCode('gong', {
+      clientId: 'client', clientSecret: 'secret', code: 'code', redirectUri: 'https://sartre.example/callback', state: 'verified',
+    }, { request: async (value) => {
+      request = value
+      return { status: 200, body: { access_token: 'access', refresh_token: 'refresh', expires_in: 3600, api_base_url_for_customer: 'https://acme.api.gong.io' }, headers: {} }
+    } })
+    expect(request!.headers?.Authorization).toBe(`Basic ${Buffer.from('client:secret').toString('base64')}`)
+    expect(request!.body).toContain('client_id=client')
+    expect(credentials).toMatchObject({ accessToken: 'access', refreshToken: 'refresh', baseUrl: 'https://acme.api.gong.io' })
   })
 
   it('records token expiry when providers return expires_in as a string', async () => {

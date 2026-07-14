@@ -103,6 +103,31 @@ describe('mainstream provider clients (scripted HTTP)', () => {
     expect(JSON.parse(bigQueryHttp.requests[0]!.body!).queryParameters[0].name).toBe('score')
   })
 
+  it('polls and paginates asynchronous Snowflake and BigQuery results', async () => {
+    const snowflakeHttp = new ScriptedHttp([
+      { statementHandle: 'h1' },
+      { statementHandle: 'h1', data: [['a']], resultSetMetaData: { numRows: 2, partitionInfo: [{ rowCount: 1 }, { rowCount: 1 }] } },
+      { statementHandle: 'h1', data: [['b']] },
+    ])
+    expect(await new SnowflakeClient({ accountUrl: 'https://acme.snowflakecomputing.com', token: 'fake' }, snowflakeHttp, { maxAttempts: 2, intervalMs: 0 }).execute('SELECT 1'))
+      .toMatchObject({ complete: true, rowCount: 2, rows: [['a'], ['b']] })
+    expect(snowflakeHttp.requests.map((request) => request.url)).toEqual([
+      'https://acme.snowflakecomputing.com/api/v2/statements',
+      'https://acme.snowflakecomputing.com/api/v2/statements/h1',
+      'https://acme.snowflakecomputing.com/api/v2/statements/h1?partition=1',
+    ])
+
+    const bigQueryHttp = new ScriptedHttp([
+      { jobComplete: false, jobReference: { jobId: 'j1' } },
+      { jobComplete: true, rows: [{ f: [{ v: 'a' }] }], totalRows: '2', pageToken: 'next' },
+      { jobComplete: true, rows: [{ f: [{ v: 'b' }] }] },
+    ])
+    expect(await new BigQueryClient('project', 'fake', bigQueryHttp, 'US', { maxAttempts: 2, intervalMs: 0 }).execute('SELECT 1'))
+      .toMatchObject({ complete: true, rowCount: 2, rows: [{ f: [{ v: 'a' }] }, { f: [{ v: 'b' }] }] })
+    expect(bigQueryHttp.requests[1]!.url).toContain('/queries/j1?')
+    expect(bigQueryHttp.requests[2]!.url).toContain('pageToken=next')
+  })
+
   it('stages provider-hosted intent signals and inbound leads', async () => {
     const intentHttp = new ScriptedHttp([{ data: [{ id: 'signal-1' }], next_cursor: 'next' }])
     const intent = new HostedIntentClient('sixsense', 'https://api.6sense.com/v1/signals', 'fake', intentHttp)

@@ -14,4 +14,4 @@ npm test
 npm run typecheck
 ```
 
-The ops portal does not require a connected tool. Each client adds only the credentials its enabled modules need; credentials remain tenant-scoped and encrypted. See [runner configuration](apps/runner/README.md), [live connectors](docs/architecture/live-connectors.md), and the [client runtime template](clients/_template/brain/config/standard-runtime.yaml).
+The ops portal does not require a connected tool. Each client adds only the credentials its enabled modules need; credentials remain tenant-scoped and encrypted. See [runner configuration](apps/runner/README.md), [live connectors](docs/architecture/live-connectors.md), the [production readiness checklist](docs/production-readiness.md), and the [client runtime template](clients/_template/brain/config/standard-runtime.yaml).

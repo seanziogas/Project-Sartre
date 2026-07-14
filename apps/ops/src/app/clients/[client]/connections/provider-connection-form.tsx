@@ -44,6 +44,10 @@ export function ProviderConnectionForm({ providers, action }: {
   }
   if (provider.id === 'gong') required.add(authKind === 'oauth' ? 'accessToken' : 'accessKey')
   if (provider.id === 'gong' && authKind === 'api_key') required.add('accessKeySecret')
+  if (provider.id === 'marketo') {
+    required.add(authKind === 'service_account' ? 'clientId' : 'accessToken')
+    if (authKind === 'service_account') required.add('clientSecret')
+  }
 
   return (
     <form action={action} className="card connection-form">

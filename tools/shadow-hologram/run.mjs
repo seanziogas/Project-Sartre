@@ -11,7 +11,7 @@
 // --cli is the proven Hologram pattern (classify_accounts.py): shell out to
 // `claude -p` — Claude Code subscription auth, no API key required.
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -26,9 +26,10 @@ const useCli = args.includes('--cli')
 const sampleIdx = args.indexOf('--sample')
 const sample = sampleIdx >= 0 ? parseInt(args[sampleIdx + 1], 10) : null
 
-const brainContext = await readFile(`${FIX}/brain-context.md`, 'utf8')
-let rows = JSON.parse(await readFile(`${FIX}/rows.json`, 'utf8'))
-const manual = JSON.parse(await readFile(`${FIX}/manual.json`, 'utf8'))
+const fixtures = await loadFixtures()
+const brainContext = fixtures.brainContext
+let rows = fixtures.rows
+const manual = fixtures.manual
 if (sample) rows = rows.slice(0, sample)
 
 const config = {
@@ -76,6 +77,33 @@ await writeFile(`${FIX}/machine-grades.json`, JSON.stringify(result, null, 2))
 await writeFile(`${FIX}/report.md`, report)
 console.log('\n' + report)
 console.log(`\nwritten: shadow-runs/hologram/report.md + machine-grades.json`)
+
+async function loadFixtures() {
+  try {
+    return {
+      brainContext: await readFile(`${FIX}/brain-context.md`, 'utf8'),
+      rows: JSON.parse(await readFile(`${FIX}/rows.json`, 'utf8')),
+      manual: JSON.parse(await readFile(`${FIX}/manual.json`, 'utf8')),
+    }
+  } catch (error) {
+    if (!fake || error?.code !== 'ENOENT') throw error
+    await mkdir(FIX, { recursive: true })
+    console.log('fixtures absent; using synthetic non-client fixtures for fake plumbing validation')
+    return {
+      brainContext: 'Synthetic validation brain: connected device makers are in-market; software-only vendors are not.',
+      rows: [
+        { id: 'connected-health-device', fields: { name: 'Connected Health Device', description: 'Cellular remote patient monitoring hardware' } },
+        { id: 'fleet-tracker', fields: { name: 'Fleet Tracker', description: 'Cellular fleet telemetry devices' } },
+        { id: 'software-only', fields: { name: 'Software Only', description: 'Analytics software with no physical device' } },
+      ],
+      manual: [
+        { id: 'connected-health-device', grade: 'A' },
+        { id: 'fleet-tracker', grade: 'B' },
+        { id: 'software-only', grade: 'X' },
+      ],
+    }
+  }
+}
 
 // Claude Code CLI client — subscription auth, no API key. System prompt via
 // temp file (93KB exceeds comfortable argv), user payload via stdin.
@@ -125,7 +153,7 @@ function fakeResponse(user) {
   return JSON.stringify(
     ids.map((id) => ({
       id,
-      score: 70,
+      score: id.includes('software-only') ? 15 : id.includes('connected-health') ? 90 : 70,
       labels: { industry: 'Healthcare', use_case: 'Remote Patient Monitoring' },
       reasoning: 'fake',
     })),

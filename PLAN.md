@@ -237,6 +237,8 @@ A typical 3-month engagement turns on two or three build modules; the always-on 
 
 ## 10. Open Items Before Phase 0
 
+Historical planning record. As of 2026-07-14, the repository boundary and taxonomy are locked and implemented; source extraction used only local read-only copies. Naming and organizational resourcing remain business decisions outside the codebase.
+
 0. **Repo boundary (standing rule)** — cxt_hub and kiln-os are company repos: never connected to, cloned, or edited from this project. Only the Project Sartre repo and files are touchable. Source material arrives as local read-only folder copies.
 1. **Source material drop** — Sean to re-download reference copies of cxt_hub, kiln-os, and the Hologram/InEight workspaces for one-way extraction.
 2. **Naming** — "Project Sartre" is the codename; decide the client-facing product name before Phase 4.

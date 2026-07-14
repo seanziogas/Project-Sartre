@@ -16,9 +16,13 @@ export interface HttpTransport {
 }
 
 export class FetchHttpTransport implements HttpTransport {
+  constructor(private readonly timeoutMs = 30_000) {
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 120_000) throw new Error('provider HTTP timeout must be 1000-120000ms')
+  }
   async request(request: HttpRequest): Promise<HttpResponse> {
     const response = await fetch(request.url, {
       method: request.method,
+      signal: AbortSignal.timeout(this.timeoutMs),
       ...(request.headers === undefined ? {} : { headers: request.headers }),
       ...(request.body === undefined ? {} : { body: request.body }),
     })
@@ -42,14 +46,22 @@ export class RetryingHttpTransport implements HttpTransport {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 5) throw new Error('maxAttempts must be 1-5')
     for (let attempt = 1; ; attempt++) {
       const response = await this.inner.request(request)
-      const retryable = response.status === 429 || (request.method !== 'POST' && response.status >= 500)
+      const retryable = request.method !== 'POST' && (response.status === 429 || response.status >= 500)
       if (attempt >= maxAttempts || !retryable) return response
-      const retryAfterHeader = response.headers['retry-after']
-      const retryAfter = retryAfterHeader === undefined ? Number.NaN : Number(retryAfterHeader)
-      const milliseconds = Number.isFinite(retryAfter) && retryAfter >= 0 ? retryAfter * 1000 : 250 * 2 ** (attempt - 1)
+      const retryAfterHeader = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'retry-after')?.[1]
+      const retryAfter = retryDelay(retryAfterHeader)
+      const milliseconds = retryAfter ?? 250 * 2 ** (attempt - 1)
       await (this.options.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(milliseconds)
     }
   }
+}
+
+function retryDelay(value: string | undefined): number | null {
+  if (value === undefined) return null
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000
+  const date = Date.parse(value)
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null
 }
 
 export function productionHttpTransport(): HttpTransport {

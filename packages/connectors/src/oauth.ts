@@ -6,11 +6,13 @@ export type OAuthProviderId =
   | 'attio' | 'outreach' | 'salesloft' | 'gmail' | 'microsoft-email'
   | 'pipedrive' | 'dynamics' | 'zoho-crm' | 'zoom' | 'google-ads' | 'meta-ads'
   | 'linkedin-ads' | 'bigquery' | 'typeform'
+  | 'gong' | 'snowflake' | 'databricks' | 'linkedin-leadgen'
 
 export const OAUTH_PROVIDERS: readonly OAuthProviderId[] = [
   'salesforce', 'hubspot', 'slack', 'teams', 'fathom', 'attio', 'outreach', 'salesloft',
   'gmail', 'microsoft-email', 'pipedrive', 'zoho-crm', 'zoom', 'google-ads', 'meta-ads',
   'dynamics', 'linkedin-ads', 'bigquery', 'typeform',
+  'gong', 'snowflake', 'databricks', 'linkedin-leadgen',
 ]
 
 export function isOAuthProvider(value: string): value is OAuthProviderId {
@@ -26,6 +28,8 @@ export interface OAuthAuthorizationInput {
   loginUrl?: string
   accountsUrl?: string
   instanceUrl?: string
+  accountUrl?: string
+  workspaceUrl?: string
 }
 
 export interface OAuthExchangeInput extends OAuthAuthorizationInput {
@@ -33,7 +37,7 @@ export interface OAuthExchangeInput extends OAuthAuthorizationInput {
   code: string
 }
 
-const defaults: Record<OAuthProviderId, { authorize: string; token: string; scopes: string[]; tokenAuth?: 'basic' }> = {
+const defaults: Record<OAuthProviderId, { authorize: string; token: string; scopes: string[]; tokenAuth?: 'basic'; retainClientId?: boolean }> = {
   salesforce: {
     authorize: 'https://login.salesforce.com/services/oauth2/authorize',
     token: 'https://login.salesforce.com/services/oauth2/token',
@@ -134,6 +138,18 @@ const defaults: Record<OAuthProviderId, { authorize: string; token: string; scop
     token: 'https://api.typeform.com/oauth/token',
     scopes: ['forms:read', 'responses:read'],
   },
+  gong: {
+    authorize: 'https://app.gong.io/oauth2/authorize',
+    token: 'https://app.gong.io/oauth2/generate-customer-token',
+    scopes: ['api:calls:read:basic', 'api:calls:read:transcript'], tokenAuth: 'basic', retainClientId: true,
+  },
+  snowflake: { authorize: '', token: '', scopes: [], tokenAuth: 'basic' },
+  databricks: { authorize: '', token: '', scopes: ['all-apis', 'offline_access'], tokenAuth: 'basic' },
+  'linkedin-leadgen': {
+    authorize: 'https://www.linkedin.com/oauth/v2/authorization',
+    token: 'https://www.linkedin.com/oauth/v2/accessToken',
+    scopes: ['r_marketing_leadgen_automation', 'r_ads'],
+  },
 }
 
 /** Builds a state-bearing authorization URL. State generation/verification belongs to the portal. */
@@ -172,7 +188,7 @@ export async function exchangeOAuthCode(
   const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' }
   if (config.tokenAuth === 'basic') {
     headers.Authorization = `Basic ${Buffer.from(`${input.clientId}:${input.clientSecret}`).toString('base64')}`
-    form.delete('client_id')
+    if (!config.retainClientId) form.delete('client_id')
     form.delete('client_secret')
   }
   const value = await requestJson<Record<string, unknown>>(http, {
@@ -186,12 +202,16 @@ export async function exchangeOAuthCode(
     ...(typeof value.refresh_token === 'string' && value.refresh_token ? { refreshToken: value.refresh_token } : {}),
     ...(provider === 'salesforce' && typeof value.instance_url === 'string' ? { instanceUrl: value.instance_url } : {}),
     ...(provider === 'zoho-crm' && typeof value.api_domain === 'string' ? { apiDomain: value.api_domain } : {}),
+    ...(provider === 'gong' && typeof value.api_base_url_for_customer === 'string' ? { baseUrl: value.api_base_url_for_customer } : {}),
+    ...(provider === 'snowflake' ? { token: accessToken } : {}),
     clientId: input.clientId,
     clientSecret: input.clientSecret,
     redirectUri: input.redirectUri,
     ...expiry(value.expires_in),
     ...(input.tenant ? { tenant: input.tenant } : {}),
     ...(input.accountsUrl ? { accountsUrl: input.accountsUrl } : {}),
+    ...(input.accountUrl ? { accountUrl: input.accountUrl } : {}),
+    ...(input.workspaceUrl ? { workspaceUrl: input.workspaceUrl } : {}),
   }
 }
 
@@ -208,13 +228,15 @@ export async function refreshOAuthToken(
     ...(credentials.tenant ? { tenant: credentials.tenant } : {}),
     ...(credentials.loginUrl ? { loginUrl: credentials.loginUrl } : {}),
     ...(credentials.accountsUrl ? { accountsUrl: credentials.accountsUrl } : {}),
+    ...(credentials.accountUrl ? { accountUrl: credentials.accountUrl } : {}),
+    ...(credentials.workspaceUrl ? { workspaceUrl: credentials.workspaceUrl } : {}),
   }
   const config = endpoints(provider, input)
   const form = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId, client_secret: clientSecret })
   const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' }
   if (config.tokenAuth === 'basic') {
     headers.Authorization = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`
-    form.delete('client_id')
+    if (!config.retainClientId) form.delete('client_id')
     form.delete('client_secret')
   }
   const value = await requestJson<Record<string, unknown>>(http, {
@@ -228,6 +250,8 @@ export async function refreshOAuthToken(
     refreshToken: typeof value.refresh_token === 'string' && value.refresh_token ? value.refresh_token : refreshToken,
     ...(provider === 'salesforce' && typeof value.instance_url === 'string' ? { instanceUrl: value.instance_url } : {}),
     ...(provider === 'zoho-crm' && typeof value.api_domain === 'string' ? { apiDomain: value.api_domain } : {}),
+    ...(provider === 'gong' && typeof value.api_base_url_for_customer === 'string' ? { baseUrl: value.api_base_url_for_customer } : {}),
+    ...(provider === 'snowflake' ? { token: stringValue(value.access_token, 'OAuth response access_token') } : {}),
     ...expiry(value.expires_in),
   }
 }
@@ -259,6 +283,14 @@ function endpoints(provider: OAuthProviderId, input: OAuthAuthorizationInput) {
     }
     return { ...config, authorize: authorize.toString() }
   }
+  if (provider === 'snowflake') {
+    const base = providerOrigin(input.accountUrl, ['snowflakecomputing.com'], 'Snowflake accountUrl')
+    return { ...config, authorize: `${base}/oauth/authorize`, token: `${base}/oauth/token-request` }
+  }
+  if (provider === 'databricks') {
+    const base = providerOrigin(input.workspaceUrl, ['databricks.com', 'azuredatabricks.net'], 'Databricks workspaceUrl')
+    return { ...config, authorize: `${base}/oidc/v1/authorize`, token: `${base}/oidc/v1/token` }
+  }
   return config
 }
 
@@ -283,4 +315,13 @@ function dynamicsOrigin(value: string): string {
 function expiry(value: unknown): Record<string, string> {
   const seconds = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN
   return Number.isFinite(seconds) && seconds > 0 ? { expiresAt: new Date(Date.now() + seconds * 1000).toISOString() } : {}
+}
+
+function providerOrigin(value: string | undefined, suffixes: string[], label: string): string {
+  if (!value) throw new Error(`${label} is required`)
+  const url = new URL(value)
+  if (url.protocol !== 'https:' || !suffixes.some((suffix) => url.hostname === suffix || url.hostname.endsWith(`.${suffix}`))) {
+    throw new Error(`${label} must be an approved HTTPS provider host`)
+  }
+  return url.origin
 }

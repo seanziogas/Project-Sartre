@@ -15,8 +15,8 @@ import type { PendingGate } from './run-data'
  * Ops-surface data layer. Every read is client-scoped — this module is the
  * tenancy boundary for the app. Sources:
  *  - manifests/brains: SARTRE_CLIENTS_DIR (default: repo clients/)
- *  - run state + feedback log: Postgres via DATABASE_URL
- *  - health reports: SARTRE_DATA_DIR (default: .sartre-data)
+ *  - run state, feedback, MVD, and health reports: Postgres via DATABASE_URL
+ *  - legacy health fallback: SARTRE_DATA_DIR (default: .sartre-data)
  */
 
 const CLIENTS_DIR = resolve(process.env.SARTRE_CLIENTS_DIR ?? join(process.cwd(), '../../clients'))

@@ -113,21 +113,44 @@ export class ZohoCrmClient implements CrmReader, ConnectionTester {
 export class MarketoClient implements InboundReader, ConnectionTester {
   readonly info = { id: 'marketo', kind: 'inbound' as const, capabilities: ['read_inbound_leads', 'read_leads', 'test_connection'] as const }
   private readonly base: string
-  constructor(instanceUrl: string, private readonly accessToken: string, private readonly listId: string, private readonly http: HttpTransport) {
-    this.base = safeHttps(instanceUrl, ['mktorest.com'], 'Marketo instanceUrl').origin
+  private accessToken: string | undefined
+  private expiresAt: number
+  constructor(
+    private readonly credentials: { instanceUrl: string; listId: string; accessToken?: string; clientId?: string; clientSecret?: string; expiresAt?: string },
+    private readonly http: HttpTransport,
+  ) {
+    this.base = safeHttps(credentials.instanceUrl, ['mktorest.com'], 'Marketo instanceUrl').origin
+    this.accessToken = credentials.accessToken
+    this.expiresAt = Date.parse(credentials.expiresAt ?? '')
   }
-  private headers() { return bearer(this.accessToken) }
   async testConnection(): Promise<ConnectionHealth> {
-    await requestJson(this.http, { method: 'GET', url: `${this.base}/rest/v1/leads/describe.json`, headers: this.headers() })
+    await requestJson(this.http, { method: 'GET', url: `${this.base}/rest/v1/leads/describe.json`, headers: await this.headers() })
     return { ok: true, provider: 'marketo', accountRef: null, detail: 'Marketo REST API reachable' }
   }
   async pullLeads(cursor?: string): Promise<StagedBatch> {
     const params = new URLSearchParams({ batchSize: '300' })
     if (cursor) params.set('nextPageToken', cursor)
-    const value = await requestJson<{ result?: unknown[]; moreResult?: boolean; nextPageToken?: string }>(this.http, {
-      method: 'GET', url: `${this.base}/rest/v1/list/${encodeURIComponent(this.listId)}/leads.json?${params}`, headers: this.headers(),
+    const value = await requestJson<{ success?: boolean; errors?: Array<{ message?: string }>; result?: unknown[]; moreResult?: boolean; nextPageToken?: string }>(this.http, {
+      method: 'GET', url: `${this.base}/rest/v1/list/${encodeURIComponent(this.credentials.listId)}/leads.json?${params}`, headers: await this.headers(),
     })
+    if (value.success === false) throw new Error(`Marketo request failed: ${value.errors?.map((error) => error.message ?? 'unknown error').join('; ') ?? 'unknown error'}`)
     return staged('marketo', 'lead', value.result, value.moreResult ? value.nextPageToken ?? null : null)
+  }
+
+  private async headers(): Promise<Record<string, string>> {
+    const valid = this.accessToken && (!Number.isFinite(this.expiresAt) || this.expiresAt > Date.now() + 60_000)
+    if (valid) return bearer(this.accessToken!)
+    if (!this.credentials.clientId || !this.credentials.clientSecret) {
+      if (this.accessToken) return bearer(this.accessToken)
+      throw new Error('Marketo clientId/clientSecret or accessToken is required')
+    }
+    const form = new URLSearchParams({ grant_type: 'client_credentials', client_id: this.credentials.clientId, client_secret: this.credentials.clientSecret })
+    const token = await requestJson<{ access_token?: string; expires_in?: number }>(this.http, {
+      method: 'POST', url: `${this.base}/identity/oauth/token`, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString(),
+    })
+    this.accessToken = required(token.access_token, 'Marketo access_token')
+    this.expiresAt = Date.now() + (token.expires_in ?? 3600) * 1000
+    return bearer(this.accessToken)
   }
 }
 

@@ -12,6 +12,7 @@
     "@sartre/core": "*",
     "@sartre/data": "*",
     "@sartre/db": "*",
+    "@sartre/learning": "*",
     "@sartre/modules": "*",
     "@sartre/pipelines": "*",
     "@sartre/skills": "*",

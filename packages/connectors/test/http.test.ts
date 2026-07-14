@@ -26,6 +26,18 @@ describe('provider HTTP resilience', () => {
     expect(calls).toBe(1)
   })
 
+  it('does not replay throttled POST effects and honors case-insensitive retry-after on safe reads', async () => {
+    let postCalls = 0
+    const post = new RetryingHttpTransport({ request: async () => { postCalls++; return { status: 429, body: {}, headers: { 'Retry-After': '0' } } } })
+    expect((await post.request({ method: 'POST', url: 'https://provider.example', body: '{}' })).status).toBe(429)
+    expect(postCalls).toBe(1)
+    const waits: number[] = []
+    let getCalls = 0
+    const get = new RetryingHttpTransport({ request: async () => ({ status: ++getCalls === 1 ? 429 : 200, body: {}, headers: { 'Retry-After': '2' } }) }, { wait: async (milliseconds) => { waits.push(milliseconds) } })
+    expect((await get.request({ method: 'GET', url: 'https://provider.example' })).status).toBe(200)
+    expect(waits).toEqual([2000])
+  })
+
   it('surfaces bounded provider detail without multiline log injection', async () => {
     const error = await requestJson<never>({ request: async () => ({ status: 400, body: { error: { message: `invalid\nrequest${'x'.repeat(500)}` } }, headers: {} }) }, {
       method: 'GET', url: 'https://provider.example',

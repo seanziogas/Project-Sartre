@@ -11,6 +11,32 @@ describe('runner deployment loading', () => {
     expect(Object.values(deps).every((resolver) => typeof resolver === 'function')).toBe(true)
   })
 
+  it('constructs every first-party resolver from one approved tenant runtime', async () => {
+    const templates = { email1: { play: { subjects: ['Hi'], body: 'Body' } }, email2: { group: { subjects: ['Hi'], body: 'Body' } }, email3: [{ subjects: ['Bye'], body: 'Body' }], slotDefaults: {}, fallbackPlay: 'play', fallbackGroup: 'group' }
+    const mapping = { object: 'account', externalIdField: 'Id', fields: [], references: [] }
+    const runtime = {
+      connections: { crm: 'salesforce', sequencer: 'outreach', comms: 'slack', email: 'gmail', audience: 'linkedin-ads', warehouse: 'snowflake' },
+      destinations: { comms: 'C1', email: 'ops@example.com' }, costs: {},
+      modules: {
+        crm: { namespacePrefix: 'Kiln_' },
+        'revops.enrichment': { accountMapping: mapping, contactMapping: { ...mapping, object: 'contact' } },
+        'sales.reactivation': { vocabularies: {}, reviewerRules: [], minScore: 70, defaultPlay: 'play', defaultGroup: 'group', campaignId: 'c1', templates },
+        'marketing.inbound': { provider: 'typeform', idField: 'id', domainField: 'domain', nameField: 'name', fieldsWanted: [], clayCreditsPerCall: 1, routingRules: { rules: [], defaultOwner: null }, ownerField: 'Kiln_Owner', reasoningField: 'Kiln_Reason' },
+        'marketing.deanon': { provider: 'g2', idField: 'id', domainField: 'domain', kindField: 'kind', occurredAtField: 'at', detailField: 'detail' },
+        'revops.dedup': { flagField: 'Kiln_Duplicate' },
+        'sales.outbound': { campaignId: 'c1', templates }, 'marketing.copy-factory': { templates },
+        'revops.routing': { rules: { rules: [], defaultOwner: null }, ownerField: 'Kiln_Owner', reasoningField: 'Kiln_Reason' },
+        'revops.tam': { scoreField: 'Kiln_Score', tierField: 'Kiln_Tier', defaultScore: 0, defaultTier: 'review' },
+        'platform.signals': { rules: [] },
+      },
+    }
+    const tool = new Proxy({}, { get: () => async () => ({}) })
+    const deps = await loadModuleDeps(undefined, {
+      db: {}, connections: {}, brains: { loadApprovedConfig: async () => runtime, loadContext: async () => 'approved brain' }, tools: tool,
+    } as never)
+    for (const resolver of Object.values(deps)) await expect(resolver('Acme')).resolves.toBeTruthy()
+  })
+
   it('binds reviewed event delivery to the tenant email connection', async () => {
     const sent: unknown[] = []
     const deps = await loadModuleDeps(undefined, {
@@ -24,5 +50,27 @@ describe('runner deployment loading', () => {
     expect(await events.send('Acme', [{ attendeeId: 'a1', email: 'buyer@example.com', event: 'Summit', play: 'attendee', draft: 'Thanks for joining.' }]))
       .toMatchObject({ affected: 1, detail: 'gmail event follow-up delivery' })
     expect(sent).toEqual([{ provider: 'gmail', message: { to: ['buyer@example.com'], subject: 'Following up on Summit', text: 'Thanks for joining.' } }])
+  })
+
+  it('collects every inbound cursor page before routing', async () => {
+    const cursors: Array<string | undefined> = []
+    const runtime = {
+      connections: {}, destinations: {}, costs: {}, modules: {
+        'marketing.inbound': { provider: 'typeform', idField: 'id', domainField: 'domain', nameField: 'name', fieldsWanted: [], clayCreditsPerCall: 0, routingRules: { rules: [], defaultOwner: null }, ownerField: 'Kiln_Owner', reasoningField: 'Kiln_Reason' },
+      },
+    }
+    const deps = await loadModuleDeps(undefined, {
+      db: {}, connections: {}, brains: { loadApprovedConfig: async () => runtime },
+      tools: {
+        inbound: async () => ({ pullLeads: async (cursor?: string) => {
+          cursors.push(cursor)
+          return { connectorId: 'typeform', object: 'lead', extractedAt: '2026-07-14T00:00:00Z', cursor: cursor ? null : 'next', rows: [{ id: cursor ? '2' : '1', domain: 'acme.com', name: 'Buyer' }] }
+        } }),
+        enrichment: async () => ({}),
+      },
+    } as never)
+    const inbound = await deps.inbound('Acme')
+    expect((await inbound.pullNewLeads()).map((lead) => lead.id)).toEqual(['1', '2'])
+    expect(cursors).toEqual([undefined, 'next'])
   })
 })

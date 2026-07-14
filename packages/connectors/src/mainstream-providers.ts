@@ -272,7 +272,11 @@ function gongTranscript(call: Record<string, unknown>): TranscriptRecord {
 export class SnowflakeClient implements WarehouseClient, ConnectionTester {
   readonly info = { id: 'snowflake', kind: 'warehouse' as const, capabilities: ['execute_sql', 'test_connection'] as const }
   private readonly base: string
-  constructor(private readonly credentials: { accountUrl: string; token: string; warehouse?: string; database?: string; schema?: string; role?: string }, private readonly http: HttpTransport) {
+  constructor(
+    private readonly credentials: { accountUrl: string; token: string; warehouse?: string; database?: string; schema?: string; role?: string },
+    private readonly http: HttpTransport,
+    private readonly polling = { maxAttempts: 20, intervalMs: 500 },
+  ) {
     this.base = safeHttps(credentials.accountUrl, ['snowflakecomputing.com'], 'Snowflake accountUrl').origin
   }
   private headers() { return { Authorization: `Bearer ${this.credentials.token}`, 'Content-Type': 'application/json', Accept: 'application/json' } }
@@ -282,13 +286,36 @@ export class SnowflakeClient implements WarehouseClient, ConnectionTester {
   }
   async execute(statement: string, bindings: Record<string, string | number | boolean | null> = {}): Promise<WarehouseQueryReceipt> {
     if (!statement.trim()) throw new Error('Snowflake statement is required')
-    const value = await requestJson<{ statementHandle?: string; data?: unknown[]; resultSetMetaData?: { numRows?: number } }>(this.http, {
+    let value = await requestJson<SnowflakeStatement>(this.http, {
       method: 'POST', url: `${this.base}/api/v2/statements`, headers: this.headers(),
       body: JSON.stringify({ statement, bindings: snowflakeBindings(bindings), warehouse: this.credentials.warehouse, database: this.credentials.database, schema: this.credentials.schema, role: this.credentials.role }),
     })
-    const resultRows = Array.isArray(value.data) ? value.data : []
-    return { provider: 'snowflake', statementHandle: value.statementHandle ?? null, rows: resultRows, rowCount: value.resultSetMetaData?.numRows ?? resultRows.length, complete: !!value.data }
+    const statementHandle = value.statementHandle
+    for (let attempt = 0; !value.data && statementHandle && attempt < this.polling.maxAttempts; attempt++) {
+      await delay(this.polling.intervalMs)
+      value = await requestJson<SnowflakeStatement>(this.http, {
+        method: 'GET', url: `${this.base}/api/v2/statements/${encodeURIComponent(statementHandle)}`, headers: this.headers(),
+      })
+    }
+    if (!value.data) return { provider: 'snowflake', statementHandle: statementHandle ?? null, rows: [], rowCount: 0, complete: false }
+    const resultRows = [...value.data]
+    const partitions = value.resultSetMetaData?.partitionInfo?.length ?? 1
+    if (partitions > 1 && !statementHandle) throw new Error('Snowflake partitioned result is missing a statement handle')
+    for (let partition = 1; partition < partitions; partition++) {
+      const page = await requestJson<SnowflakeStatement>(this.http, {
+        method: 'GET', url: `${this.base}/api/v2/statements/${encodeURIComponent(statementHandle!)}?partition=${partition}`, headers: this.headers(),
+      })
+      resultRows.push(...(page.data ?? []))
+    }
+    return { provider: 'snowflake', statementHandle: statementHandle ?? null, rows: resultRows, rowCount: value.resultSetMetaData?.numRows ?? resultRows.length, complete: true }
   }
+}
+
+interface SnowflakeStatement {
+  statementHandle?: string
+  data?: unknown[]
+  message?: string
+  resultSetMetaData?: { numRows?: number; partitionInfo?: Array<{ rowCount?: number }> }
 }
 
 function snowflakeBindings(bindings: Record<string, string | number | boolean | null>) {
@@ -300,7 +327,13 @@ function snowflakeBindings(bindings: Record<string, string | number | boolean | 
 
 export class BigQueryClient implements WarehouseClient, ConnectionTester {
   readonly info = { id: 'bigquery', kind: 'warehouse' as const, capabilities: ['execute_sql', 'test_connection'] as const }
-  constructor(private readonly projectId: string, private readonly accessToken: string, private readonly http: HttpTransport, private readonly location?: string) {}
+  constructor(
+    private readonly projectId: string,
+    private readonly accessToken: string,
+    private readonly http: HttpTransport,
+    private readonly location?: string,
+    private readonly polling = { maxAttempts: 20, intervalMs: 500 },
+  ) {}
   private headers() { return bearer(this.accessToken) }
   async testConnection(): Promise<ConnectionHealth> {
     await this.execute('SELECT 1')
@@ -308,13 +341,44 @@ export class BigQueryClient implements WarehouseClient, ConnectionTester {
   }
   async execute(statement: string, bindings: Record<string, string | number | boolean | null> = {}): Promise<WarehouseQueryReceipt> {
     if (!statement.trim()) throw new Error('BigQuery statement is required')
-    const value = await requestJson<{ jobComplete?: boolean; jobReference?: { jobId?: string }; rows?: unknown[]; totalRows?: string }>(this.http, {
+    let value = await requestJson<BigQueryResult>(this.http, {
       method: 'POST', url: `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(this.projectId)}/queries`, headers: this.headers(),
       body: JSON.stringify({ query: statement, useLegacySql: false, ...(this.location ? { location: this.location } : {}), parameterMode: 'NAMED', queryParameters: bigQueryParameters(bindings) }),
     })
-    const resultRows = Array.isArray(value.rows) ? value.rows : []
-    return { provider: 'bigquery', statementHandle: value.jobReference?.jobId ?? null, rows: resultRows, rowCount: Number(value.totalRows ?? resultRows.length), complete: value.jobComplete ?? false }
+    const jobId = value.jobReference?.jobId
+    for (let attempt = 0; value.jobComplete === false && jobId && attempt < this.polling.maxAttempts; attempt++) {
+      await delay(this.polling.intervalMs)
+      value = await this.results(jobId)
+    }
+    if (value.jobComplete === false) return { provider: 'bigquery', statementHandle: jobId ?? null, rows: [], rowCount: 0, complete: false }
+    if (value.errors?.length) throw new Error(`BigQuery query failed: ${value.errors.map((error) => error.message ?? error.reason ?? 'unknown error').join('; ')}`)
+    const resultRows = [...(value.rows ?? [])]
+    let pageToken = value.pageToken
+    for (let page = 0; pageToken && jobId && page < 100; page++) {
+      const next = await this.results(jobId, pageToken)
+      if (next.errors?.length) throw new Error(`BigQuery result page failed: ${next.errors.map((error) => error.message ?? error.reason ?? 'unknown error').join('; ')}`)
+      resultRows.push(...(next.rows ?? []))
+      pageToken = next.pageToken
+      if (page === 99 && pageToken) throw new Error('BigQuery results exceeded 100 pages')
+    }
+    return { provider: 'bigquery', statementHandle: jobId ?? null, rows: resultRows, rowCount: Number(value.totalRows ?? resultRows.length), complete: true }
   }
+
+  private results(jobId: string, pageToken?: string): Promise<BigQueryResult> {
+    const params = new URLSearchParams({ timeoutMs: '10000', ...(this.location ? { location: this.location } : {}), ...(pageToken ? { pageToken } : {}) })
+    return requestJson<BigQueryResult>(this.http, {
+      method: 'GET', url: `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(this.projectId)}/queries/${encodeURIComponent(jobId)}?${params}`, headers: this.headers(),
+    })
+  }
+}
+
+interface BigQueryResult {
+  jobComplete?: boolean
+  jobReference?: { jobId?: string }
+  rows?: unknown[]
+  totalRows?: string
+  pageToken?: string
+  errors?: Array<{ message?: string; reason?: string }>
 }
 
 function bigQueryParameters(bindings: Record<string, string | number | boolean | null>) {
@@ -324,6 +388,8 @@ function bigQueryParameters(bindings: Record<string, string | number | boolean |
     parameterValue: { value: value === null ? null : String(value) },
   }))
 }
+
+function delay(milliseconds: number): Promise<void> { return milliseconds > 0 ? new Promise((resolve) => setTimeout(resolve, milliseconds)) : Promise.resolve() }
 
 export type HostedIntentProvider = 'sixsense' | 'g2' | 'clearbit' | 'koala' | 'bombora'
 const intentHosts: Record<HostedIntentProvider, string[]> = {

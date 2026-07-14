@@ -462,7 +462,13 @@ export function createProviderClient(
     case 'linkedin-leadgen':
     case 'typeform':
     case 'chilipiper': return new HostedInboundClient(provider, required(credentials, 'leadsUrl'), required(credentials, 'accessToken'), http)
-    case 'marketo': return new MarketoClient(required(credentials, 'instanceUrl'), required(credentials, 'accessToken'), required(credentials, 'listId'), http)
+    case 'marketo': return new MarketoClient({
+      instanceUrl: required(credentials, 'instanceUrl'), listId: required(credentials, 'listId'),
+      ...(credentials.accessToken ? { accessToken: credentials.accessToken } : {}),
+      ...(credentials.clientId ? { clientId: credentials.clientId } : {}),
+      ...(credentials.clientSecret ? { clientSecret: credentials.clientSecret } : {}),
+      ...(credentials.expiresAt ? { expiresAt: credentials.expiresAt } : {}),
+    }, http)
   }
 }
 

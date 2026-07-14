@@ -20,8 +20,7 @@ export default async function Health({ params }: { params: Promise<{ client: str
       <h1>Data health</h1>
       {!report ? (
         <div className="card muted">
-          No Data Health Report yet — run the Day-1 Data Audit. The audit writes{' '}
-          <span className="mono">health-report.json</span> into this client&apos;s data directory.
+          No Data Health Report yet — run the Day-1 Data Audit or canonical enrichment refresh. The current report is stored in this client&apos;s Postgres runtime artifacts.
         </div>
       ) : (
         <>

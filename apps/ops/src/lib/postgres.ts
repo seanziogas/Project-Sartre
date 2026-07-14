@@ -15,6 +15,7 @@ interface OpsDatabase {
   connections: PostgresToolConnectionStore
   connectionEvents: PostgresToolConnectionEventStore
   artifacts: PostgresRuntimeArtifactStore
+  health(): Promise<void>
 }
 
 const globalDatabase = globalThis as typeof globalThis & {
@@ -37,6 +38,7 @@ async function initialize(): Promise<OpsDatabase> {
       connections: new PostgresToolConnectionStore(connection),
       connectionEvents: new PostgresToolConnectionEventStore(connection),
       artifacts: new PostgresRuntimeArtifactStore(connection),
+      health: async () => { await connection.query('SELECT 1') },
     }
   } catch (error) {
     await connection.close()

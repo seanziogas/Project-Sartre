@@ -23,7 +23,7 @@ export const PROVIDER_CATALOG = [
   { id: 'gmail', label: 'Gmail', category: 'comms', auth: ['oauth'], requiredCredentials: ['accessToken'], optionalCredentials: ['clientId', 'clientSecret', 'refreshToken'], detail: 'Approved email delivery through Gmail API.' },
   { id: 'microsoft-email', label: 'Microsoft Email', category: 'comms', auth: ['oauth'], requiredCredentials: ['accessToken'], optionalCredentials: ['clientId', 'clientSecret', 'refreshToken', 'tenant'], detail: 'Approved email delivery through Microsoft Graph.' },
   { id: 'fathom', label: 'Fathom', category: 'meetings', auth: ['api_key', 'oauth'], requiredCredentials: ['accessToken'], optionalCredentials: ['apiKey', 'clientId', 'clientSecret', 'refreshToken'], detail: 'Meeting and transcript reads.' },
-  { id: 'gong', label: 'Gong', category: 'meetings', auth: ['api_key', 'oauth'], requiredCredentials: ['baseUrl'], optionalCredentials: ['accessToken', 'accessKey', 'accessKeySecret', 'lookbackDays'], detail: 'Call transcript reads from the tenant Gong API host.' },
+  { id: 'gong', label: 'Gong', category: 'meetings', auth: ['api_key', 'oauth'], requiredCredentials: ['baseUrl'], optionalCredentials: ['accessToken', 'accessKey', 'accessKeySecret', 'clientId', 'clientSecret', 'refreshToken', 'lookbackDays'], detail: 'Call transcript reads from the tenant Gong API host.' },
   { id: 'fireflies', label: 'Fireflies.ai', category: 'meetings', auth: ['api_key'], requiredCredentials: ['apiKey'], detail: 'GraphQL transcript reads.' },
   { id: 'zoom', label: 'Zoom', category: 'meetings', auth: ['oauth'], requiredCredentials: ['accessToken'], optionalCredentials: ['clientId', 'clientSecret', 'refreshToken'], detail: 'Cloud recording transcript reads.' },
   { id: 'smartlead', label: 'Smartlead', category: 'sequencer', auth: ['api_key'], requiredCredentials: ['apiKey'], detail: 'Reviewed campaign enrollment.' },
@@ -46,11 +46,11 @@ export const PROVIDER_CATALOG = [
   { id: 'clearbit', label: 'Clearbit', category: 'intent', auth: ['api_key'], requiredCredentials: ['apiKey', 'signalsUrl'], detail: 'Provider-host-constrained intent staging.' },
   { id: 'koala', label: 'Koala', category: 'intent', auth: ['api_key'], requiredCredentials: ['apiKey', 'signalsUrl'], detail: 'Provider-host-constrained intent staging.' },
   { id: 'bombora', label: 'Bombora', category: 'intent', auth: ['api_key'], requiredCredentials: ['apiKey', 'signalsUrl'], detail: 'Provider-host-constrained intent staging.' },
-  { id: 'qualified', label: 'Qualified', category: 'inbound', auth: ['oauth', 'api_key'], requiredCredentials: ['accessToken', 'leadsUrl'], detail: 'Provider-host-constrained inbound staging.' },
+  { id: 'qualified', label: 'Qualified', category: 'inbound', auth: ['api_key'], requiredCredentials: ['accessToken', 'leadsUrl'], detail: 'Provider-host-constrained inbound staging with a tenant API token.' },
   { id: 'linkedin-leadgen', label: 'LinkedIn Lead Gen', category: 'inbound', auth: ['oauth'], requiredCredentials: ['accessToken', 'leadsUrl'], detail: 'Provider-host-constrained inbound staging.' },
   { id: 'typeform', label: 'Typeform', category: 'inbound', auth: ['oauth'], requiredCredentials: ['accessToken', 'leadsUrl'], detail: 'Form response staging.' },
-  { id: 'chilipiper', label: 'Chili Piper', category: 'inbound', auth: ['oauth', 'api_key'], requiredCredentials: ['accessToken', 'leadsUrl'], detail: 'Provider-host-constrained inbound staging.' },
-  { id: 'marketo', label: 'Adobe Marketo Engage', category: 'inbound', auth: ['oauth'], requiredCredentials: ['instanceUrl', 'accessToken', 'listId'], detail: 'Lead staging from a configured Marketo list.' },
+  { id: 'chilipiper', label: 'Chili Piper', category: 'inbound', auth: ['api_key'], requiredCredentials: ['accessToken', 'leadsUrl'], detail: 'Provider-host-constrained inbound staging with a tenant API token.' },
+  { id: 'marketo', label: 'Adobe Marketo Engage', category: 'inbound', auth: ['service_account', 'api_key'], requiredCredentials: ['instanceUrl', 'listId'], optionalCredentials: ['clientId', 'clientSecret', 'accessToken', 'expiresAt'], detail: 'Lead staging with Marketo two-legged OAuth or a short-lived access token.' },
 ] as const satisfies readonly ProviderDefinition[]
 
 export type SupportedProvider = typeof PROVIDER_CATALOG[number]['id']
@@ -77,6 +77,10 @@ export function validateProviderCredentials(provider: string, credentials: Recor
   if (provider === 'gong') {
     if (authKind === 'oauth' && !credentials.accessToken?.trim()) missing.push('accessToken')
     if (authKind !== 'oauth' && (!credentials.accessKey?.trim() || !credentials.accessKeySecret?.trim())) missing.push('accessKey/accessKeySecret')
+  }
+  if (provider === 'marketo') {
+    if (authKind === 'service_account' && (!credentials.clientId?.trim() || !credentials.clientSecret?.trim())) missing.push('clientId/clientSecret')
+    if (authKind === 'api_key' && !credentials.accessToken?.trim()) missing.push('accessToken')
   }
   if (provider === 'redshift' && !credentials.clusterIdentifier?.trim() && !credentials.workgroupName?.trim()) missing.push('clusterIdentifier/workgroupName')
   if (missing.length) throw new Error(`${provider} requires credential fields: ${[...new Set(missing)].join(', ')}`)

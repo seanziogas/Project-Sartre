@@ -24,17 +24,17 @@ The mainstream GTM integration catalog is implemented in `@sartre/connectors` be
 | Apollo | API health; reviewed contact creation and enrollment into an existing sequence |
 | HeyReach / lemlist / Mailshake | Reviewed enrollment through client-configured, provider-host-constrained API routes |
 | LinkedIn / Google / Meta Ads | Reviewed audience add/remove batches; email identifiers are normalized and SHA-256 hashed locally; supported OAuth flows |
-| Snowflake | SQL API health and parameterized statements against the client's warehouse context |
-| BigQuery | Jobs Query API health and parameterized Standard SQL against the client's project/location; Google OAuth |
+| Snowflake | SQL API health and parameterized statements against the client's warehouse context, with bounded asynchronous polling and partition pagination |
+| BigQuery | Jobs Query API health and parameterized Standard SQL against the client's project/location, with bounded job polling and result pagination; Google OAuth |
 | Databricks | SQL Statement API execution with named parameters and bounded asynchronous status polling |
 | Amazon Redshift | SigV4-signed, idempotent Data API execution with bounded status polling and paginated results |
 | 6sense / G2 / Clearbit / Koala / Bombora | Raw intent-signal staging through client-configured, provider-host-constrained partner endpoints |
 | Qualified / LinkedIn Lead Gen / Typeform / Chili Piper | Raw inbound-lead staging through client-configured, provider-host-constrained endpoints |
-| Marketo | Paginated lead staging from a configured list on the tenant's `mktorest.com` instance |
+| Marketo | Paginated lead staging from a configured list on the tenant's `mktorest.com` instance using two-legged OAuth or a supplied short-lived token |
 
 Provider behavior follows the current official surfaces. Stable public APIs receive native clients. Contract-specific and partner APIs receive typed adapters with client-configured routes that are constrained to the provider's HTTPS host; they cannot be used as arbitrary webhooks or internal-network request proxies. Clay remains client-configured because portfolio Clay tables and waterfall schemas vary by client.
 
-Every client is resolved through `TenantConnectionResolver`. OAuth callback state is encrypted, client-bound, actor-bound, and expires after ten minutes. Supported portal OAuth flows cover Salesforce, HubSpot, Slack, Teams, Fathom, Attio, Outreach, Salesloft, Gmail, Microsoft Email, Pipedrive, Dynamics 365, Zoho CRM, Zoom, LinkedIn Ads, Google Ads, Meta Ads, BigQuery, and Typeform. Access/refresh tokens are stored in the same encrypted connection envelope; rotating providers receive their new refresh token on refresh, and unexpired access tokens are not refreshed early. The runner's `TenantToolClients` constructs clients per execution and never caches cleartext.
+Every client is resolved through `TenantConnectionResolver`. OAuth callback state is encrypted, client-bound, actor-bound, tamper-evident, and expires after ten minutes. Supported portal OAuth flows cover Salesforce, HubSpot, Slack, Teams, Fathom, Attio, Gong, Outreach, Salesloft, Gmail, Microsoft Email, Pipedrive, Dynamics 365, Zoho CRM, Zoom, LinkedIn Ads, LinkedIn Lead Gen, Google Ads, Meta Ads, Snowflake, BigQuery, Databricks, and Typeform. Access/refresh tokens are stored in the same encrypted connection envelope; rotating providers receive their new refresh token on refresh, and unexpired access tokens are not refreshed early. Marketo uses its tenant's two-legged client-credentials flow. The runner's `TenantToolClients` constructs clients per execution and never caches cleartext.
 
 CRM writes require all three controls: fields pass the namespace guard, current source values are persisted in the client-scoped Postgres snapshot store, and the calling pipeline has already resolved its structural `crm_write` gate. Message, email, sequence, audience, and warehouse clients expose effect methods, but module pipelines cannot reach them before the corresponding structural human gate.
 

@@ -31,6 +31,9 @@ export type Capability =
   | 'read_transcripts'
   | 'enroll_sequence'
   | 'sync_audience'
+  | 'execute_sql'
+  | 'read_inbound_leads'
+  | 'send_email'
   | 'convert_leads'
   | 'test_connection'
 
@@ -100,6 +103,31 @@ export interface AudienceSyncReceipt { provider: string; audienceId: string; add
 export interface AudienceSyncClient {
   info: ConnectorInfo
   syncEmails(audienceId: string, add: string[], remove: string[]): Promise<AudienceSyncReceipt>
+}
+
+export interface WarehouseQueryReceipt {
+  provider: string
+  statementHandle: string | null
+  rows: unknown[]
+  rowCount: number
+  complete: boolean
+}
+
+/** SQL reaches this boundary only after an ETL pipeline's human gate. */
+export interface WarehouseClient {
+  info: ConnectorInfo
+  execute(statement: string, bindings?: Record<string, string | number | boolean | null>): Promise<WarehouseQueryReceipt>
+}
+
+export interface InboundReader {
+  info: ConnectorInfo
+  pullLeads(cursor?: string): Promise<StagedBatch>
+}
+
+export interface EmailReceipt { provider: string; messageId: string; recipients: string[] }
+export interface EmailSender {
+  info: ConnectorInfo
+  sendEmail(input: { to: string[]; subject: string; text: string; replyTo?: string }): Promise<EmailReceipt>
 }
 
 /** Raw rows exactly as the source system returned them, plus extraction metadata. */

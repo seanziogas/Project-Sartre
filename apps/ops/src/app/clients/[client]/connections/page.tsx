@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { notFound, redirect } from 'next/navigation'
 import { canAccessClient } from '@sartre/core'
-import { CredentialVault, oauthAuthorizationUrl } from '@sartre/connectors'
+import { CredentialVault, oauthAuthorizationUrl, SUPPORTED_PROVIDERS } from '@sartre/connectors'
 import type { OAuthProviderId } from '@sartre/connectors'
 import { assertClientAccess, getPortalIdentity } from '@/lib/auth'
 import { connectTool, getManifest, listToolConnectionEvents, listToolConnections, revokeToolConnection, rotateToolConnection, testToolConnection } from '@/lib/data'
@@ -9,7 +9,13 @@ import { ClientTabs } from '@/lib/nav'
 
 export const dynamic = 'force-dynamic'
 
-const providers = ['salesforce', 'hubspot', 'clay', 'slack', 'teams', 'fathom', 'smartlead', 'instantly', 'linkedin-ads']
+const credentialFields = [
+  'apiKey', 'accessToken', 'instanceUrl', 'enrichmentUrl', 'healthcheckUrl',
+  'clientId', 'clientSecret', 'refreshToken', 'serviceAccountJson',
+  'baseUrl', 'accountUrl', 'token', 'projectId', 'mailboxId', 'enrollmentUrl',
+  'signalsUrl', 'leadsUrl', 'accessKey', 'accessKeySecret', 'location',
+  'warehouse', 'database', 'schema', 'role', 'lookbackDays', 'apiVersion',
+] as const
 
 export default async function ConnectionsPage({ params }: { params: Promise<{ client: string }> }) {
   const clientId = decodeURIComponent((await params).client)
@@ -30,7 +36,7 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
       throw new Error('subscription status does not permit connection changes')
     }
     const credentials = Object.fromEntries(
-      ['apiKey', 'accessToken', 'instanceUrl', 'enrichmentUrl', 'clientId', 'clientSecret', 'refreshToken', 'serviceAccountJson']
+      credentialFields
         .map((key) => [key, String(formData.get(key) ?? '').trim()] as const)
         .filter(([, value]) => value !== ''),
     )
@@ -173,7 +179,7 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
           <h2>Connect a tool</h2>
           <form action={connect} className="card connection-form">
             <label>Provider<input type="text" name="provider" list="connection-providers" required placeholder="salesforce" /></label>
-            <datalist id="connection-providers">{providers.map((provider) => <option key={provider} value={provider} />)}</datalist>
+            <datalist id="connection-providers">{SUPPORTED_PROVIDERS.map((provider) => <option key={provider} value={provider} />)}</datalist>
             <label>Connection label<input type="text" name="label" required placeholder="Production CRM" /></label>
             <label>Authentication
               <select name="authKind" required defaultValue="api_key">
@@ -186,6 +192,22 @@ export default async function ConnectionsPage({ params }: { params: Promise<{ cl
             <label>Access token<input type="password" name="accessToken" autoComplete="off" /></label>
             <label>CRM instance URL<input type="text" name="instanceUrl" autoComplete="off" /></label>
             <label>Clay enrichment URL<input type="text" name="enrichmentUrl" autoComplete="off" /></label>
+            <label>Provider API/base URL<input type="url" name="baseUrl" autoComplete="off" /></label>
+            <label>Snowflake account URL<input type="url" name="accountUrl" autoComplete="off" /></label>
+            <label>Warehouse token<input type="password" name="token" autoComplete="off" /></label>
+            <label>BigQuery project ID<input type="text" name="projectId" autoComplete="off" /></label>
+            <label>Outreach mailbox ID<input type="text" name="mailboxId" autoComplete="off" /></label>
+            <label>Partner enrollment URL<input type="url" name="enrollmentUrl" autoComplete="off" /></label>
+            <label>Intent signals URL<input type="url" name="signalsUrl" autoComplete="off" /></label>
+            <label>Inbound leads URL<input type="url" name="leadsUrl" autoComplete="off" /></label>
+            <label>Gong access key<input type="password" name="accessKey" autoComplete="off" /></label>
+            <label>Gong access-key secret<input type="password" name="accessKeySecret" autoComplete="off" /></label>
+            <label>Warehouse/location<input type="text" name="location" autoComplete="off" /></label>
+            <label>Warehouse name<input type="text" name="warehouse" autoComplete="off" /></label>
+            <label>Database<input type="text" name="database" autoComplete="off" /></label>
+            <label>Schema<input type="text" name="schema" autoComplete="off" /></label>
+            <label>Role<input type="text" name="role" autoComplete="off" /></label>
+            <label>Transcript lookback days<input type="number" min="1" max="365" name="lookbackDays" /></label>
             <label>OAuth client ID<input type="password" name="clientId" autoComplete="off" /></label>
             <label>OAuth client secret<input type="password" name="clientSecret" autoComplete="off" /></label>
             <label>OAuth refresh token<input type="password" name="refreshToken" autoComplete="off" /></label>

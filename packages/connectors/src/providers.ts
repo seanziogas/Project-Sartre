@@ -23,6 +23,22 @@ import type {
 import { partitionNamespacedWrites } from './contract.js'
 import { bearer, requestJson } from './http.js'
 import type { HttpTransport } from './http.js'
+import {
+  ApolloClient,
+  AttioClient,
+  BigQueryClient,
+  GmailClient,
+  GongClient,
+  HostedInboundClient,
+  HostedIntentClient,
+  MicrosoftEmailClient,
+  OutreachClient,
+  PartnerSequencerClient,
+  SalesloftClient,
+  SnowflakeClient,
+} from './mainstream-providers.js'
+
+export * from './mainstream-providers.js'
 
 function now(): string { return new Date().toISOString() }
 function objectRows(value: unknown): Record<string, unknown>[] {
@@ -320,7 +336,23 @@ function linkedInAudienceElement(action: 'ADD' | 'REMOVE', email: string) {
   return { action, userIds: [{ idType: 'SHA256_EMAIL', idValue: createHash('sha256').update(normalized).digest('hex') }] }
 }
 
-export type SupportedProvider = 'salesforce' | 'hubspot' | 'clay' | 'slack' | 'teams' | 'fathom' | 'smartlead' | 'instantly' | 'linkedin-ads'
+export const SUPPORTED_PROVIDERS = [
+  'salesforce', 'hubspot', 'attio',
+  'clay',
+  'slack', 'teams', 'gmail', 'microsoft-email',
+  'fathom', 'gong',
+  'smartlead', 'instantly', 'outreach', 'salesloft', 'apollo', 'heyreach', 'lemlist', 'mailshake',
+  'linkedin-ads',
+  'snowflake', 'bigquery',
+  'sixsense', 'g2', 'clearbit', 'koala', 'bombora',
+  'qualified', 'linkedin-leadgen', 'typeform', 'chilipiper',
+] as const
+
+export type SupportedProvider = typeof SUPPORTED_PROVIDERS[number]
+
+export function isSupportedProvider(value: string): value is SupportedProvider {
+  return (SUPPORTED_PROVIDERS as readonly string[]).includes(value)
+}
 
 export function createProviderClient(
   provider: SupportedProvider,
@@ -335,18 +367,51 @@ export function createProviderClient(
       ...(credentials.apiVersion ? { apiVersion: credentials.apiVersion } : {}),
     }, http, writeOptions)
     case 'hubspot': return new HubSpotClient({ accessToken: required(credentials, 'accessToken') }, http, writeOptions)
+    case 'attio': return new AttioClient(required(credentials, 'accessToken'), http, writeOptions)
     case 'clay': return new ClayClient({
       apiKey: required(credentials, 'apiKey'), enrichmentUrl: required(credentials, 'enrichmentUrl'),
       ...(credentials.healthcheckUrl ? { healthcheckUrl: credentials.healthcheckUrl } : {}),
     }, http)
     case 'slack': return new SlackClient(required(credentials, 'accessToken'), http)
     case 'teams': return new TeamsClient(required(credentials, 'accessToken'), http)
+    case 'gmail': return new GmailClient(required(credentials, 'accessToken'), http)
+    case 'microsoft-email': return new MicrosoftEmailClient(required(credentials, 'accessToken'), http)
     case 'fathom': return new FathomClient(credentials.apiKey
       ? { apiKey: credentials.apiKey }
       : { accessToken: required(credentials, 'accessToken') }, http)
+    case 'gong': return new GongClient({
+      baseUrl: required(credentials, 'baseUrl'),
+      ...(credentials.accessToken ? { accessToken: credentials.accessToken } : {}),
+      ...(credentials.accessKey ? { accessKey: credentials.accessKey } : {}),
+      ...(credentials.accessKeySecret ? { accessKeySecret: credentials.accessKeySecret } : {}),
+      ...(credentials.lookbackDays ? { lookbackDays: credentials.lookbackDays } : {}),
+    }, http)
     case 'smartlead': return new SmartleadClient(required(credentials, 'apiKey'), http)
     case 'instantly': return new InstantlyClient(required(credentials, 'apiKey'), http)
+    case 'outreach': return new OutreachClient(required(credentials, 'accessToken'), required(credentials, 'mailboxId'), http)
+    case 'salesloft': return new SalesloftClient(required(credentials, 'accessToken'), http)
+    case 'apollo': return new ApolloClient(required(credentials, 'apiKey'), http)
+    case 'heyreach':
+    case 'lemlist':
+    case 'mailshake': return new PartnerSequencerClient(provider, required(credentials, 'enrollmentUrl'), required(credentials, 'apiKey'), http)
     case 'linkedin-ads': return new LinkedInAdsClient(required(credentials, 'accessToken'), http, credentials.apiVersion ?? '202606')
+    case 'snowflake': return new SnowflakeClient({
+      accountUrl: required(credentials, 'accountUrl'), token: required(credentials, 'token'),
+      ...(credentials.warehouse ? { warehouse: credentials.warehouse } : {}),
+      ...(credentials.database ? { database: credentials.database } : {}),
+      ...(credentials.schema ? { schema: credentials.schema } : {}),
+      ...(credentials.role ? { role: credentials.role } : {}),
+    }, http)
+    case 'bigquery': return new BigQueryClient(required(credentials, 'projectId'), required(credentials, 'accessToken'), http, credentials.location)
+    case 'sixsense':
+    case 'g2':
+    case 'clearbit':
+    case 'koala':
+    case 'bombora': return new HostedIntentClient(provider, required(credentials, 'signalsUrl'), required(credentials, 'apiKey'), http)
+    case 'qualified':
+    case 'linkedin-leadgen':
+    case 'typeform':
+    case 'chilipiper': return new HostedInboundClient(provider, required(credentials, 'leadsUrl'), required(credentials, 'accessToken'), http)
   }
 }
 

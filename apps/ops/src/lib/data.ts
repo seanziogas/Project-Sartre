@@ -6,8 +6,8 @@ import { parseManifest } from '@sartre/core'
 import type { ClientManifest, FeedbackEvent } from '@sartre/core'
 import type { RunRecord } from '@sartre/pipelines'
 import type { DataHealthReport } from '@sartre/data'
-import { createProviderClient, CredentialVault, productionHttpTransport, ToolConnectionInput } from '@sartre/connectors'
-import type { ConnectionHealth, SupportedProvider, ToolConnectionEvent, ToolConnectionSummary } from '@sartre/connectors'
+import { createProviderClient, CredentialVault, isSupportedProvider, productionHttpTransport, ToolConnectionInput } from '@sartre/connectors'
+import type { ConnectionHealth, ToolConnectionEvent, ToolConnectionSummary } from '@sartre/connectors'
 import { getOpsDatabase } from './postgres'
 import type { PendingGate } from './run-data'
 
@@ -174,11 +174,11 @@ export async function testToolConnection(
   const database = await getOpsDatabase()
   const stored = await database.connections.get(clientId, connectionId)
   if (!stored || stored.status !== 'active') throw new Error('active connection not found for client')
-  if (!['salesforce', 'hubspot', 'clay', 'slack', 'teams', 'fathom', 'smartlead', 'instantly', 'linkedin-ads'].includes(stored.provider)) {
+  if (!isSupportedProvider(stored.provider)) {
     throw new Error(`connection testing is not available for ${stored.provider}`)
   }
   const credentials = new CredentialVault(key).open(stored.encryptedCredentials, clientId)
-  const health = await createProviderClient(stored.provider as SupportedProvider, credentials, productionHttpTransport()).testConnection()
+  const health = await createProviderClient(stored.provider, credentials, productionHttpTransport()).testConnection()
   await database.connectionEvents.append({
     eventId: randomUUID(), connectionId, clientId, kind: 'tested', actor,
     detail: health.detail, occurredAt: new Date().toISOString(),

@@ -159,11 +159,21 @@ export class HubSpotClient extends BearerProvider implements CrmReader, CrmWrite
 export class ClayClient implements EnrichmentProvider, ConnectionTester {
   readonly info = { id: 'clay', kind: 'enrichment' as const, capabilities: ['enrich', 'test_connection'] as const }
   constructor(
-    private readonly credentials: { apiKey: string; enrichmentUrl: string },
+    private readonly credentials: { apiKey: string; enrichmentUrl: string; healthcheckUrl?: string },
     private readonly http: HttpTransport,
-  ) { assertClayUrl(credentials.enrichmentUrl) }
+  ) {
+    assertClayUrl(credentials.enrichmentUrl)
+    if (credentials.healthcheckUrl) assertClayUrl(credentials.healthcheckUrl)
+  }
   async testConnection(): Promise<ConnectionHealth> {
-    return { ok: true, provider: 'clay', accountRef: null, detail: 'Clay webhook configuration valid' }
+    if (!this.credentials.healthcheckUrl) {
+      return { ok: true, provider: 'clay', accountRef: null, detail: 'Clay webhook configuration valid; add healthcheckUrl for live reachability' }
+    }
+    await requestJson(this.http, {
+      method: 'GET', url: this.credentials.healthcheckUrl,
+      headers: { Authorization: `Bearer ${this.credentials.apiKey}` },
+    })
+    return { ok: true, provider: 'clay', accountRef: null, detail: 'Clay healthcheck reachable' }
   }
   async enrich(domain: string, fields: string[]): Promise<Record<string, string | number | boolean | null>> {
     const value = await requestJson<{ data?: Record<string, string | number | boolean | null> }>(this.http, {
@@ -325,7 +335,10 @@ export function createProviderClient(
       ...(credentials.apiVersion ? { apiVersion: credentials.apiVersion } : {}),
     }, http, writeOptions)
     case 'hubspot': return new HubSpotClient({ accessToken: required(credentials, 'accessToken') }, http, writeOptions)
-    case 'clay': return new ClayClient({ apiKey: required(credentials, 'apiKey'), enrichmentUrl: required(credentials, 'enrichmentUrl') }, http)
+    case 'clay': return new ClayClient({
+      apiKey: required(credentials, 'apiKey'), enrichmentUrl: required(credentials, 'enrichmentUrl'),
+      ...(credentials.healthcheckUrl ? { healthcheckUrl: credentials.healthcheckUrl } : {}),
+    }, http)
     case 'slack': return new SlackClient(required(credentials, 'accessToken'), http)
     case 'teams': return new TeamsClient(required(credentials, 'accessToken'), http)
     case 'fathom': return new FathomClient(credentials.apiKey

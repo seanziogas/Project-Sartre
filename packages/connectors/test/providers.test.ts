@@ -31,6 +31,15 @@ describe('production provider clients (scripted HTTP)', () => {
     expect(JSON.parse(http.requests[0]!.body!)).toEqual({ domain: 'acme.example', fields: ['industry'] })
   })
 
+  it('tests a client-owned Clay health endpoint when configured', async () => {
+    const http = new ScriptedHttp([{}])
+    const clay = new ClayClient({
+      apiKey: 'fake', enrichmentUrl: 'https://api.clay.com/webhook', healthcheckUrl: 'https://api.clay.com/health',
+    }, http)
+    expect(await clay.testConnection()).toMatchObject({ ok: true, detail: 'Clay healthcheck reachable' })
+    expect(http.requests[0]).toMatchObject({ method: 'GET', url: 'https://api.clay.com/health' })
+  })
+
   it('rejects arbitrary Clay webhook hosts to prevent tenant-triggered SSRF', () => {
     expect(() => new ClayClient({ apiKey: 'fake', enrichmentUrl: 'http://127.0.0.1/admin' }, new ScriptedHttp([]))).toThrow('clay.com')
   })

@@ -6,7 +6,7 @@ The first portfolio-frequency tier is implemented in `@sartre/connectors` behind
 |---|---|
 | Salesforce | Account/contact/opportunity/activity/lead reads; API health; snapshot-backed namespaced CRM writes; OAuth code exchange/refresh |
 | HubSpot | Company/contact/deal/meeting/lead reads; API health; snapshot-backed namespaced CRM writes; OAuth code exchange/refresh |
-| Clay | Client-owned enrichment webhook and configuration health |
+| Clay | Client-owned enrichment webhook; optional live health endpoint, with configuration-only health when the client has no non-consuming health URL |
 | Slack | OAuth health and approved message delivery |
 | Microsoft Teams | Microsoft Graph health and approved channel-message delivery |
 | Fathom | Meeting/transcript reads through API key or OAuth; token exchange/refresh |

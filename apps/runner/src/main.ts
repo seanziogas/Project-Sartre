@@ -12,7 +12,7 @@ import { TenantToolClients } from './tools.js'
  * Runner service entrypoint. Config via env:
  *   SARTRE_CLIENTS_DIR  — client instances (default ../../clients)
  *   DATABASE_URL        — shared Postgres used by ops and runner (required)
- *   SARTRE_MODULE_DEPS  — optional deployment adapter; required only to execute configured modules
+ *   SARTRE_MODULE_DEPS  — optional deployment override; built-in adapter is the default
  *   SARTRE_CREDENTIAL_ENCRYPTION_KEY — required only when an adapter resolves a client connection
  *   SARTRE_TICK_MS      — tick interval (default 30000)
  */

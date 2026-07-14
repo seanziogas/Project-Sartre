@@ -11,6 +11,9 @@ import type {
   EnrichmentProvider,
   MessageReceipt,
   MessageSender,
+  LeadConversionReceipt,
+  LeadConversionRequest,
+  LeadConverter,
   StagedBatch,
   TranscriptReader,
   TranscriptRecord,
@@ -23,6 +26,8 @@ import type {
 import { partitionNamespacedWrites } from './contract.js'
 import { bearer, requestJson } from './http.js'
 import type { HttpTransport } from './http.js'
+import type { SupportedProvider } from './catalog.js'
+export { SUPPORTED_PROVIDERS, isSupportedProvider } from './catalog.js'
 import {
   ApolloClient,
   AttioClient,
@@ -37,8 +42,21 @@ import {
   SalesloftClient,
   SnowflakeClient,
 } from './mainstream-providers.js'
+import {
+  DatabricksClient,
+  DynamicsClient,
+  FirefliesClient,
+  GoogleAdsAudienceClient,
+  MarketoClient,
+  MetaAdsAudienceClient,
+  PipedriveClient,
+  RedshiftClient,
+  ZoomClient,
+  ZohoCrmClient,
+} from './expanded-providers.js'
 
 export * from './mainstream-providers.js'
+export * from './expanded-providers.js'
 
 function now(): string { return new Date().toISOString() }
 function objectRows(value: unknown): Record<string, unknown>[] {
@@ -52,10 +70,10 @@ abstract class BearerProvider implements ConnectionTester {
   abstract testConnection(): Promise<ConnectionHealth>
 }
 
-export interface SalesforceCredentials { accessToken: string; instanceUrl: string; apiVersion?: string }
+export interface SalesforceCredentials { accessToken: string; instanceUrl: string; apiVersion?: string; convertedLeadStatus?: string }
 export interface CrmWriteOptions { namespacePrefix: string; snapshots: ConnectorSnapshotStore }
 
-export class SalesforceClient extends BearerProvider implements CrmReader, CrmWriter {
+export class SalesforceClient extends BearerProvider implements CrmReader, CrmWriter, LeadConverter {
   readonly info: ConnectorInfo
   private readonly base: string
   constructor(private readonly credentials: SalesforceCredentials, http: HttpTransport, private readonly writeOptions?: CrmWriteOptions) {
@@ -68,7 +86,7 @@ export class SalesforceClient extends BearerProvider implements CrmReader, CrmWr
       id: 'salesforce', kind: 'crm',
       capabilities: [
         'read_accounts', 'read_contacts', 'read_opportunities', 'read_activities', 'read_leads', 'test_connection',
-        ...(writeOptions ? ['snapshot', 'write_namespaced_fields'] as const : []),
+        ...(writeOptions ? ['snapshot', 'write_namespaced_fields', 'convert_leads'] as const : []),
       ],
     }
     this.base = `${instanceUrl.origin}/services/data/v${credentials.apiVersion ?? '67.0'}`
@@ -82,6 +100,33 @@ export class SalesforceClient extends BearerProvider implements CrmReader, CrmWr
   pullOpportunities(cursor?: string): Promise<StagedBatch> { return this.query('opportunity', 'SELECT Id,Name,AccountId,StageName,Amount,CloseDate,OwnerId,LastModifiedDate FROM Opportunity', cursor) }
   pullActivities(cursor?: string): Promise<StagedBatch> { return this.query('activity', 'SELECT Id,Subject,WhoId,WhatId,ActivityDate,OwnerId,LastModifiedDate FROM Task', cursor) }
   pullLeads(cursor?: string): Promise<StagedBatch> { return this.query('lead', 'SELECT Id,FirstName,LastName,Email,Company,Website,Status,OwnerId,LastModifiedDate FROM Lead', cursor) }
+  async snapshotLeads(requests: LeadConversionRequest[]): Promise<string> {
+    const options = this.requireWriteOptions()
+    const values = await Promise.all(requests.map((request) => requestJson(this.http, {
+      method: 'GET', url: `${this.base}/sobjects/Lead/${encodeURIComponent(request.leadExternalId)}`,
+      headers: this.headers(),
+    })))
+    const writes: NamespacedWrite[] = requests.map((request) => ({ object: 'contact', externalId: request.leadExternalId, fields: {} }))
+    return options.snapshots.capture('salesforce-lead-convert', writes, values)
+  }
+  async convertLeads(requests: LeadConversionRequest[], snapshotRef: string): Promise<LeadConversionReceipt> {
+    const options = this.requireWriteOptions()
+    if (!await options.snapshots.exists('salesforce-lead-convert', snapshotRef)) throw new Error('valid Salesforce lead snapshot is required before conversion')
+    if (!this.credentials.convertedLeadStatus?.trim()) throw new Error('Salesforce convertedLeadStatus is required for lead conversion')
+    const value = await requestJson<{ compositeResponse?: Array<{ httpStatusCode?: number; body?: { id?: string; errors?: unknown[] } }> }>(this.http, {
+      method: 'POST', url: `${this.base}/composite`, headers: this.headers(),
+      body: JSON.stringify({ allOrNone: false, compositeRequest: requests.map((request, index) => ({
+        method: 'POST', url: `/services/data/v${this.credentials.apiVersion ?? '67.0'}/actions/standard/convertLead`, referenceId: `convert${index}`,
+        body: { inputs: [{ leadId: request.leadExternalId, convertedStatus: this.credentials.convertedLeadStatus, ...(request.targetAccountExternalId ? { accountId: request.targetAccountExternalId } : {}) }] },
+      })) }),
+    })
+    const responses = value.compositeResponse ?? []
+    return {
+      converted: responses.filter((response) => (response.httpStatusCode ?? 500) >= 200 && (response.httpStatusCode ?? 500) < 300).length,
+      rejected: responses.flatMap((response, index) => (response.httpStatusCode ?? 500) >= 300 ? [{ request: requests[index]!, reason: 'Salesforce lead conversion rejected' }] : []),
+      snapshotRef,
+    }
+  }
   async snapshot(writes: NamespacedWrite[]): Promise<string> {
     const options = this.requireWriteOptions()
     const { allowed, rejected } = partitionNamespacedWrites(writes, options.namespacePrefix)
@@ -108,7 +153,12 @@ export class SalesforceClient extends BearerProvider implements CrmReader, CrmWr
     return this.writeOptions
   }
   private async query(object: StagedBatch['object'], soql: string, cursor?: string): Promise<StagedBatch> {
-    const url = cursor ? new URL(cursor, this.credentials.instanceUrl).toString() : `${this.base}/query?q=${encodeURIComponent(soql)}`
+    let url = `${this.base}/query?q=${encodeURIComponent(soql)}`
+    if (cursor) {
+      const next = new URL(cursor, this.credentials.instanceUrl)
+      if (next.origin !== new URL(this.credentials.instanceUrl).origin) throw new Error('Salesforce cursor must remain on the configured instance')
+      url = next.toString()
+    }
     const value = await requestJson<{ records?: unknown[]; nextRecordsUrl?: string }>(this.http, { method: 'GET', url, headers: this.headers() })
     return { connectorId: 'salesforce', object, extractedAt: now(), cursor: value.nextRecordsUrl ?? null, rows: objectRows(value.records) }
   }
@@ -336,24 +386,6 @@ function linkedInAudienceElement(action: 'ADD' | 'REMOVE', email: string) {
   return { action, userIds: [{ idType: 'SHA256_EMAIL', idValue: createHash('sha256').update(normalized).digest('hex') }] }
 }
 
-export const SUPPORTED_PROVIDERS = [
-  'salesforce', 'hubspot', 'attio',
-  'clay',
-  'slack', 'teams', 'gmail', 'microsoft-email',
-  'fathom', 'gong',
-  'smartlead', 'instantly', 'outreach', 'salesloft', 'apollo', 'heyreach', 'lemlist', 'mailshake',
-  'linkedin-ads',
-  'snowflake', 'bigquery',
-  'sixsense', 'g2', 'clearbit', 'koala', 'bombora',
-  'qualified', 'linkedin-leadgen', 'typeform', 'chilipiper',
-] as const
-
-export type SupportedProvider = typeof SUPPORTED_PROVIDERS[number]
-
-export function isSupportedProvider(value: string): value is SupportedProvider {
-  return (SUPPORTED_PROVIDERS as readonly string[]).includes(value)
-}
-
 export function createProviderClient(
   provider: SupportedProvider,
   credentials: Record<string, string>,
@@ -365,9 +397,13 @@ export function createProviderClient(
       accessToken: required(credentials, 'accessToken'),
       instanceUrl: required(credentials, 'instanceUrl'),
       ...(credentials.apiVersion ? { apiVersion: credentials.apiVersion } : {}),
+      ...(credentials.convertedLeadStatus ? { convertedLeadStatus: credentials.convertedLeadStatus } : {}),
     }, http, writeOptions)
     case 'hubspot': return new HubSpotClient({ accessToken: required(credentials, 'accessToken') }, http, writeOptions)
     case 'attio': return new AttioClient(required(credentials, 'accessToken'), http, writeOptions)
+    case 'pipedrive': return new PipedriveClient(required(credentials, 'accessToken'), http)
+    case 'dynamics': return new DynamicsClient(required(credentials, 'instanceUrl'), required(credentials, 'accessToken'), http, credentials.apiVersion ?? 'v9.2')
+    case 'zoho-crm': return new ZohoCrmClient(required(credentials, 'apiDomain'), required(credentials, 'accessToken'), http)
     case 'clay': return new ClayClient({
       apiKey: required(credentials, 'apiKey'), enrichmentUrl: required(credentials, 'enrichmentUrl'),
       ...(credentials.healthcheckUrl ? { healthcheckUrl: credentials.healthcheckUrl } : {}),
@@ -386,6 +422,8 @@ export function createProviderClient(
       ...(credentials.accessKeySecret ? { accessKeySecret: credentials.accessKeySecret } : {}),
       ...(credentials.lookbackDays ? { lookbackDays: credentials.lookbackDays } : {}),
     }, http)
+    case 'fireflies': return new FirefliesClient(required(credentials, 'apiKey'), http)
+    case 'zoom': return new ZoomClient(required(credentials, 'accessToken'), http)
     case 'smartlead': return new SmartleadClient(required(credentials, 'apiKey'), http)
     case 'instantly': return new InstantlyClient(required(credentials, 'apiKey'), http)
     case 'outreach': return new OutreachClient(required(credentials, 'accessToken'), required(credentials, 'mailboxId'), http)
@@ -395,6 +433,8 @@ export function createProviderClient(
     case 'lemlist':
     case 'mailshake': return new PartnerSequencerClient(provider, required(credentials, 'enrollmentUrl'), required(credentials, 'apiKey'), http)
     case 'linkedin-ads': return new LinkedInAdsClient(required(credentials, 'accessToken'), http, credentials.apiVersion ?? '202606')
+    case 'google-ads': return new GoogleAdsAudienceClient(required(credentials, 'accessToken'), required(credentials, 'customerId'), http)
+    case 'meta-ads': return new MetaAdsAudienceClient(required(credentials, 'accessToken'), required(credentials, 'adAccountId'), http, credentials.apiVersion ?? 'v24.0')
     case 'snowflake': return new SnowflakeClient({
       accountUrl: required(credentials, 'accountUrl'), token: required(credentials, 'token'),
       ...(credentials.warehouse ? { warehouse: credentials.warehouse } : {}),
@@ -403,6 +443,16 @@ export function createProviderClient(
       ...(credentials.role ? { role: credentials.role } : {}),
     }, http)
     case 'bigquery': return new BigQueryClient(required(credentials, 'projectId'), required(credentials, 'accessToken'), http, credentials.location)
+    case 'databricks': return new DatabricksClient(required(credentials, 'workspaceUrl'), required(credentials, 'accessToken'), required(credentials, 'warehouseId'), http)
+    case 'redshift': return new RedshiftClient({
+      region: required(credentials, 'region'), accessKeyId: required(credentials, 'accessKeyId'), secretAccessKey: required(credentials, 'secretAccessKey'),
+      database: required(credentials, 'database'),
+      ...(credentials.sessionToken ? { sessionToken: credentials.sessionToken } : {}),
+      ...(credentials.clusterIdentifier ? { clusterIdentifier: credentials.clusterIdentifier } : {}),
+      ...(credentials.workgroupName ? { workgroupName: credentials.workgroupName } : {}),
+      ...(credentials.secretArn ? { secretArn: credentials.secretArn } : {}),
+      ...(credentials.dbUser ? { dbUser: credentials.dbUser } : {}),
+    }, http)
     case 'sixsense':
     case 'g2':
     case 'clearbit':
@@ -412,6 +462,7 @@ export function createProviderClient(
     case 'linkedin-leadgen':
     case 'typeform':
     case 'chilipiper': return new HostedInboundClient(provider, required(credentials, 'leadsUrl'), required(credentials, 'accessToken'), http)
+    case 'marketo': return new MarketoClient(required(credentials, 'instanceUrl'), required(credentials, 'accessToken'), required(credentials, 'listId'), http)
   }
 }
 

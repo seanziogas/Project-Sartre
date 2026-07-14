@@ -6,7 +6,7 @@ import { parseManifest } from '@sartre/core'
 import type { ClientManifest, FeedbackEvent } from '@sartre/core'
 import type { RunRecord } from '@sartre/pipelines'
 import type { DataHealthReport } from '@sartre/data'
-import { createProviderClient, CredentialVault, isSupportedProvider, productionHttpTransport, ToolConnectionInput } from '@sartre/connectors'
+import { createProviderClient, CredentialVault, isSupportedProvider, productionHttpTransport, ToolConnectionInput, validateProviderCredentials } from '@sartre/connectors'
 import type { ConnectionHealth, ToolConnectionEvent, ToolConnectionSummary } from '@sartre/connectors'
 import { getOpsDatabase } from './postgres'
 import type { PendingGate } from './run-data'
@@ -98,6 +98,7 @@ export async function connectTool(
   actor: string,
 ): Promise<ToolConnectionSummary> {
   const parsed = ToolConnectionInput.parse(input)
+  validateProviderCredentials(parsed.provider, parsed.credentials, parsed.authKind)
   const key = process.env.SARTRE_CREDENTIAL_ENCRYPTION_KEY
   if (!key) throw new Error('SARTRE_CREDENTIAL_ENCRYPTION_KEY is required to save connections')
   const now = new Date().toISOString()

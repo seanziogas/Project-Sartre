@@ -1,0 +1,97 @@
+# Deployment-owned defaults for the first-party SARTRE_MODULE_DEPS bundle.
+# Copy into a client instance, replace every example, review it, and only then
+# change status to active and record the human approver. Pipeline effect gates
+# remain mandatory even when this configuration is active.
+version: 1
+status: draft
+updated: 2026-07-14
+approved_by: ""
+config:
+  connections:
+    crm: salesforce
+    sequencer: outreach
+    comms: slack
+    email: gmail
+    audience: linkedin-ads
+    warehouse: snowflake
+  destinations:
+    comms: "REPLACE_WITH_CHANNEL_ID"
+    email: "ops@example.com"
+  costs:
+    graderRowUsd: 0.01
+    copilotBriefUsd: 0.05
+    replyUsd: 0.02
+    metricsReportUsd: 0.08
+  modules:
+    crm:
+      namespacePrefix: "Kiln_"
+    revops.enrichment:
+      accountMapping:
+        object: account
+        externalIdField: Id
+        fields:
+          - { source: Name, target: name, transform: string, required: true }
+          - { source: Website, target: domain, transform: domain }
+        references: []
+      contactMapping:
+        object: contact
+        externalIdField: Id
+        fields:
+          - { source: FirstName, target: firstName, transform: string }
+          - { source: LastName, target: lastName, transform: string }
+          - { source: Email, target: email, transform: email }
+        references:
+          - { source: AccountId, target: accountId, recordType: account }
+    sales.reactivation:
+      vocabularies: {}
+      reviewerRules: []
+      minScore: 70
+      defaultPlay: timing-check-in
+      defaultGroup: catchall
+      campaignId: "REPLACE_WITH_CAMPAIGN_ID"
+      templates: &campaign_templates
+        email1:
+          timing-check-in:
+            subjects: ["Worth revisiting?"]
+            body: "Hi {{first_name}}, {grade_reasoning}"
+        email2:
+          catchall:
+            subjects: ["A quick follow-up"]
+            body: "Would a short conversation be useful?"
+        email3:
+          - subjects: ["Close the loop?"]
+            body: "Happy to close the loop if priorities changed."
+        slotDefaults:
+          grade_reasoning: "Your priorities may have changed since we last spoke."
+        fallbackPlay: timing-check-in
+        fallbackGroup: catchall
+    marketing.inbound:
+      provider: typeform
+      idField: response_id
+      domainField: company_domain
+      nameField: name
+      fieldsWanted: [industry, employee_count]
+      clayCreditsPerCall: 1
+      routingRules: &routing_rules
+        rules: []
+        defaultOwner: null
+      ownerField: Kiln_Owner__c
+      reasoningField: Kiln_Routing_Reason__c
+    revops.dedup:
+      flagField: Kiln_Duplicate_Group__c
+    sales.outbound:
+      campaignId: "REPLACE_WITH_CAMPAIGN_ID"
+      templates: *campaign_templates
+    marketing.copy-factory:
+      templates: *campaign_templates
+    revops.routing:
+      rules: *routing_rules
+      ownerField: Kiln_Owner__c
+      reasoningField: Kiln_Routing_Reason__c
+    revops.tam:
+      scoreField: Kiln_TAM_Score__c
+      tierField: Kiln_TAM_Tier__c
+      defaultScore: 0
+      defaultTier: review
+    platform.signals:
+      rules: []

@@ -4,4 +4,14 @@ The Kiln's GTM Operating System — one platform, instanced per client. Repeatab
 
 **Start here: [PLAN.md](PLAN.md)** — the master build plan (architecture, module map, phases, stack, risks, open items).
 
-Status: pre-build. Phase 0 begins once source-repo access is restored (see PLAN.md §10).
+Status: the Phase 0–4 platform build is implemented. All 23 locked module IDs have dedicated registered pipelines, Postgres-backed runtime state, structural approval gates, client-scoped encrypted connections, a built-in deployment adapter, and a 40-provider integration catalog. Live provider/model verification still requires deployment-owned credentials; CI uses scripted fakes only.
+
+Core commands:
+
+```sh
+npm run build
+npm test
+npm run typecheck
+```
+
+The ops portal does not require a connected tool. Each client adds only the credentials its enabled modules need; credentials remain tenant-scoped and encrypted. See [runner configuration](apps/runner/README.md), [live connectors](docs/architecture/live-connectors.md), and the [client runtime template](clients/_template/brain/config/standard-runtime.yaml).

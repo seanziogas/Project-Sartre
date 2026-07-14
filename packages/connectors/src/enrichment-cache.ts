@@ -53,7 +53,7 @@ export interface CacheStore {
   put(entry: CacheEntry): Promise<void>
 }
 
-/** Simple in-memory store; Postgres adapter replaces this in Phase 2. */
+/** Simple in-memory store for tests and local use; production uses PostgresCacheStore. */
 export class MemoryCacheStore implements CacheStore {
   private readonly entries = new Map<string, CacheEntry>()
   async get(domain: string): Promise<CacheEntry | null> {

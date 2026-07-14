@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RetryingHttpTransport } from '../src/http.js'
+import { requestJson, RetryingHttpTransport } from '../src/http.js'
 
 describe('provider HTTP resilience', () => {
   it('retries throttles and transient failures with bounded backoff', async () => {
@@ -24,5 +24,14 @@ describe('provider HTTP resilience', () => {
     const transport = new RetryingHttpTransport({ request: async () => { calls++; return { status: 503, body: {}, headers: {} } } })
     expect((await transport.request({ method: 'POST', url: 'https://provider.example', body: '{}' })).status).toBe(503)
     expect(calls).toBe(1)
+  })
+
+  it('surfaces bounded provider detail without multiline log injection', async () => {
+    const error = await requestJson<never>({ request: async () => ({ status: 400, body: { error: { message: `invalid\nrequest${'x'.repeat(500)}` } }, headers: {} }) }, {
+      method: 'GET', url: 'https://provider.example',
+    }).catch((value: unknown) => value as Error)
+    expect(error.message).toMatch(/^provider request failed \(400\): invalid requestx+$/)
+    expect(error.message).not.toContain('\n')
+    expect(error.message.length).toBeLessThan(340)
   })
 })

@@ -48,6 +48,11 @@ describe('production provider clients (scripted HTTP)', () => {
     expect(() => new SalesforceClient({ accessToken: 'fake', instanceUrl: 'https://127.0.0.1' }, new ScriptedHttp([]))).toThrow('salesforce.com')
   })
 
+  it('rejects Salesforce pagination cursors that leave the configured tenant host', async () => {
+    const salesforce = new SalesforceClient({ accessToken: 'fake', instanceUrl: 'https://acme.my.salesforce.com' }, new ScriptedHttp([]))
+    await expect(salesforce.pullAccounts('https://attacker.example/next')).rejects.toThrow('configured instance')
+  })
+
   it('sends through Slack and Teams only when explicitly invoked after a gate', async () => {
     const slackHttp = new ScriptedHttp([{ ok: true, ts: '123.4' }])
     expect((await new SlackClient('fake', slackHttp).sendMessage('C1', 'Approved')).externalId).toBe('123.4')
@@ -103,5 +108,29 @@ describe('production provider clients (scripted HTTP)', () => {
     expect(http.requests.map((request) => request.method)).toEqual(['GET', 'PATCH'])
     await expect(salesforce.snapshot([{ object: 'account', externalId: '001', fields: { Name: 'Changed' } }])).rejects.toThrow('outside namespace')
     await expect(salesforce.writeNamespaced(writes, 'missing')).rejects.toThrow('snapshot is required')
+  })
+
+  it('requires a source snapshot and configured converted status before Salesforce lead conversion', async () => {
+    const captured = new Set<string>()
+    const snapshots = {
+      capture: async (provider: string) => { captured.add(`${provider}:lead-snapshot`); return 'lead-snapshot' },
+      exists: async (provider: string, ref: string) => captured.has(`${provider}:${ref}`),
+    }
+    const http = new ScriptedHttp([
+      { Id: '00Q1', Status: 'Qualified' },
+      { compositeResponse: [{ httpStatusCode: 200, body: { outputValues: { contactId: '0031' } } }] },
+    ])
+    const salesforce = new SalesforceClient(
+      { accessToken: 'fake', instanceUrl: 'https://acme.my.salesforce.com', convertedLeadStatus: 'Qualified' },
+      http,
+      { namespacePrefix: 'Kiln_', snapshots },
+    )
+    const requests = [{ leadExternalId: '00Q1', targetAccountExternalId: '0011' }]
+    const snapshot = await salesforce.snapshotLeads(requests)
+    expect(await salesforce.convertLeads(requests, snapshot)).toMatchObject({ converted: 1, snapshotRef: 'lead-snapshot' })
+    expect(JSON.parse(http.requests[1]!.body!).compositeRequest[0].body.inputs[0]).toMatchObject({
+      leadId: '00Q1', accountId: '0011', convertedStatus: 'Qualified',
+    })
+    await expect(salesforce.convertLeads(requests, 'missing')).rejects.toThrow('snapshot is required')
   })
 })

@@ -59,4 +59,19 @@ describe('TenantConnectionResolver', () => {
     expect((await client.testConnection()).accountRef).toBe('T1')
     await expect(resolver.providerClient('OtherClient', 'slack')).rejects.toThrow('not found')
   })
+
+  it('does not refresh an OAuth access token before its expiry window', async () => {
+    const connection: StoredToolConnection = {
+      connectionId: 'connection-3', clientId: 'Acme', provider: 'slack', authKind: 'oauth',
+      label: 'Slack', status: 'active', metadata: {},
+      encryptedCredentials: new CredentialVault(key).seal({
+        accessToken: 'fake-token', refreshToken: 'fake-refresh', clientId: 'client', clientSecret: 'secret',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      }, 'Acme'),
+      createdAt: '2026-07-13T12:00:00Z', updatedAt: '2026-07-13T12:00:00Z',
+    }
+    const resolver = new TenantConnectionResolver(storeWith(connection) as never, key)
+    const client = await resolver.providerClient('Acme', 'slack', { request: async () => { throw new Error('token endpoint must not be called') } })
+    expect(client.info.id).toBe('slack')
+  })
 })

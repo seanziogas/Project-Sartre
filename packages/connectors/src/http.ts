@@ -1,5 +1,5 @@
 export interface HttpRequest {
-  method: 'GET' | 'POST' | 'PATCH'
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE'
   url: string
   headers?: Record<string, string>
   body?: string
@@ -59,9 +59,18 @@ export function productionHttpTransport(): HttpTransport {
 export async function requestJson<T>(transport: HttpTransport, request: HttpRequest): Promise<T> {
   const response = await transport.request(request)
   if (response.status < 200 || response.status >= 300) {
-    throw new Error(`provider request failed (${response.status})`)
+    throw new Error(`provider request failed (${response.status})${providerErrorSuffix(response.body)}`)
   }
   return response.body as T
+}
+
+function providerErrorSuffix(body: unknown): string {
+  if (!body || typeof body !== 'object') return ''
+  const record = body as Record<string, unknown>
+  const nested = record.error && typeof record.error === 'object' ? record.error as Record<string, unknown> : null
+  const value = nested?.message ?? record.message ?? record.error_description
+  if (typeof value !== 'string' || !value.trim()) return ''
+  return `: ${value.replace(/[\r\n]+/g, ' ').slice(0, 300)}`
 }
 
 export function bearer(token: string): Record<string, string> {

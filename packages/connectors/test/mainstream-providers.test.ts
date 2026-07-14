@@ -27,7 +27,7 @@ class ScriptedHttp implements HttpTransport {
 
 describe('mainstream provider clients (scripted HTTP)', () => {
   it('publishes one testable registry for every supported provider', () => {
-    expect(SUPPORTED_PROVIDERS).toHaveLength(30)
+    expect(SUPPORTED_PROVIDERS).toHaveLength(40)
     expect(new Set(SUPPORTED_PROVIDERS).size).toBe(SUPPORTED_PROVIDERS.length)
     expect(isSupportedProvider('attio')).toBe(true)
     expect(isSupportedProvider('arbitrary-host')).toBe(false)

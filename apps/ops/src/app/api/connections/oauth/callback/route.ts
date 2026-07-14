@@ -1,5 +1,4 @@
-import { CredentialVault, exchangeOAuthCode, productionHttpTransport } from '@sartre/connectors'
-import type { OAuthProviderId } from '@sartre/connectors'
+import { CredentialVault, exchangeOAuthCode, isOAuthProvider, productionHttpTransport, validateProviderCredentials } from '@sartre/connectors'
 import { assertClientAccess, getPortalIdentity } from '@/lib/auth'
 import { connectTool, getManifest } from '@/lib/data'
 
@@ -33,15 +32,26 @@ export async function GET(request: Request): Promise<Response> {
   if (!manifest || !['trialing', 'active'].includes(manifest.commercial.status)) {
     return new Response('Subscription does not permit connection changes', { status: 403 })
   }
-  const provider = payload.provider as OAuthProviderId
-  if (!['salesforce', 'hubspot', 'slack', 'teams', 'fathom'].includes(provider)) return new Response('Unsupported provider', { status: 400 })
-  const credentials = await exchangeOAuthCode(provider, {
+  const provider = payload.provider
+  if (!isOAuthProvider(provider)) return new Response('Unsupported provider', { status: 400 })
+  const exchanged = await exchangeOAuthCode(provider, {
     clientId: payload.oauthClientId!, clientSecret: payload.oauthClientSecret!, code,
     redirectUri: payload.redirectUri!, state,
+    ...(payload.tenant ? { tenant: payload.tenant } : {}),
+    ...(payload.accountsUrl ? { accountsUrl: payload.accountsUrl } : {}),
   }, productionHttpTransport())
+  const credentials = { ...exchanged, ...oauthConnectionExtras(payload) }
+  validateProviderCredentials(provider, credentials, 'oauth')
   await connectTool(clientId, {
     provider, authKind: 'oauth', label: payload.label!, credentials,
     metadata: { oauth: 'true' },
   }, identity.email)
   return Response.redirect(new URL(`/clients/${encodeURIComponent(clientId)}/connections`, request.url), 303)
+}
+
+function oauthConnectionExtras(payload: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    ['mailboxId', 'customerId', 'adAccountId', 'instanceUrl', 'apiDomain', 'accountsUrl', 'tenant', 'apiVersion', 'projectId', 'leadsUrl']
+      .flatMap((key) => payload[key] ? [[key, payload[key]!]] : []),
+  )
 }

@@ -6,7 +6,7 @@ import type { GateDecisionInput, RunRecord, RunnerStore, RunStatus } from './typ
 
 /**
  * File-backed run store: one JSON file per run under <dir>/<clientId>/runs/.
- * Good enough for internal v1 and local dev; the Postgres adapter replaces it
+ * Local-development adapter; production runner and ops use the Postgres store
  * behind the same interface. Tenancy note: files are partitioned by client
  * directory, and reads are always client-scoped or id-scoped.
  */

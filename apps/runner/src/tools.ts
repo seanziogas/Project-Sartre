@@ -36,7 +36,7 @@ export class TenantToolClients {
     return this.connections.providerClient(clientId, provider) as Promise<MessageSender & ConnectionTester>
   }
 
-  async meetings(clientId: string, provider: 'fathom' | 'gong' = 'fathom'): Promise<TranscriptReader & ConnectionTester> {
+  async meetings(clientId: string, provider: 'fathom' | 'gong' | 'fireflies' | 'zoom' = 'fathom'): Promise<TranscriptReader & ConnectionTester> {
     return this.connections.providerClient(clientId, provider) as Promise<TranscriptReader & ConnectionTester>
   }
 
@@ -44,11 +44,11 @@ export class TenantToolClients {
     return this.connections.providerClient(clientId, provider) as Promise<SequencerClient & ConnectionTester>
   }
 
-  async audience(clientId: string): Promise<AudienceSyncClient & ConnectionTester> {
-    return this.connections.providerClient(clientId, 'linkedin-ads') as Promise<AudienceSyncClient & ConnectionTester>
+  async audience(clientId: string, provider: 'linkedin-ads' | 'google-ads' | 'meta-ads' = 'linkedin-ads'): Promise<AudienceSyncClient & ConnectionTester> {
+    return this.connections.providerClient(clientId, provider) as Promise<AudienceSyncClient & ConnectionTester>
   }
 
-  async warehouse(clientId: string, provider: 'snowflake' | 'bigquery'): Promise<WarehouseClient & ConnectionTester> {
+  async warehouse(clientId: string, provider: 'snowflake' | 'bigquery' | 'databricks' | 'redshift'): Promise<WarehouseClient & ConnectionTester> {
     return this.connections.providerClient(clientId, provider) as Promise<WarehouseClient & ConnectionTester>
   }
 
@@ -58,6 +58,14 @@ export class TenantToolClients {
 
   async inbound(clientId: string, provider: 'qualified' | 'linkedin-leadgen' | 'typeform' | 'chilipiper'): Promise<InboundReader & ConnectionTester> {
     return this.connections.providerClient(clientId, provider) as Promise<InboundReader & ConnectionTester>
+  }
+
+  async marketingAutomation(clientId: string): Promise<InboundReader & ConnectionTester> {
+    return this.connections.providerClient(clientId, 'marketo') as Promise<InboundReader & ConnectionTester>
+  }
+
+  async crmReader(clientId: string, provider: 'pipedrive' | 'dynamics' | 'zoho-crm'): Promise<CrmReader & ConnectionTester> {
+    return this.connections.providerClient(clientId, provider) as Promise<CrmReader & ConnectionTester>
   }
 
   async email(clientId: string, provider: 'gmail' | 'microsoft-email'): Promise<EmailSender & ConnectionTester> {

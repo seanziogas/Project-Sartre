@@ -10,9 +10,11 @@
   "dependencies": {
     "@sartre/connectors": "*",
     "@sartre/core": "*",
+    "@sartre/data": "*",
     "@sartre/db": "*",
     "@sartre/modules": "*",
     "@sartre/pipelines": "*",
-    "@sartre/skills": "*"
+    "@sartre/skills": "*",
+    "zod": "^3.24.2"
   }
 }

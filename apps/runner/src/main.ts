@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { FileClientBrainStore, loadManifestsFromDir, parseManifest } from '@sartre/core'
 import { createPostgresConnection, migrate, PostgresConfigReleaseStore, PostgresEffectLedger, PostgresRunStore, PostgresRuntimeArtifactStore, PostgresScheduleClaimStore, PostgresToolConnectionStore } from '@sartre/db'
 import { Runner } from '@sartre/pipelines'
-import { AnthropicLlmClient } from '@sartre/skills'
+import { AnthropicLlmClient, llmModelFromEnvironment } from '@sartre/skills'
 import { HttpOtlpTransport, NoopTelemetry, OtlpTelemetry, ResilientTelemetry } from '@sartre/operations'
 import { loadModuleDeps } from './deployment.js'
 import { buildRegistry } from './registry.js'
@@ -23,7 +23,7 @@ import { createOperationalLogger } from './operational-log.js'
  */
 const config = loadRunnerConfig(process.env, resolve(import.meta.dirname, '../../..'))
 const connection = createPostgresConnection(config.databaseUrl)
-const llm = new AnthropicLlmClient('claude-opus-4-8')
+const llm = new AnthropicLlmClient(llmModelFromEnvironment(process.env))
 const brains = new FileClientBrainStore(config.clientsDir)
 const connections = new TenantConnectionResolver(
   new PostgresToolConnectionStore(connection),

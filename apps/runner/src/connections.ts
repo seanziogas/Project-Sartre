@@ -1,4 +1,4 @@
-import { createProviderClient, CredentialVault, isOAuthProvider, productionHttpTransport, refreshOAuthToken } from '@sartre/connectors'
+import { createConnectorClient, CredentialVault, isOAuthProvider, productionHttpTransport, refreshOAuthToken, usesMcpTransport } from '@sartre/connectors'
 import type { ConnectionTester, CredentialKeyConfig, CrmWriteOptions, HttpTransport, SupportedProvider, ToolConnectionSummary } from '@sartre/connectors'
 import { PostgresToolConnectionStore } from '@sartre/db'
 
@@ -51,7 +51,8 @@ export class TenantConnectionResolver {
     let credentials = resolved.credentials
     const expiresAt = Date.parse(credentials.expiresAt ?? '')
     const shouldRefresh = !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 60_000
-    if (isOAuthProvider(provider) && resolved.connection.authKind === 'oauth' && credentials.refreshToken && shouldRefresh) {
+    // MCP-bridged connections authenticate to the MCP server, not the provider's OAuth.
+    if (!usesMcpTransport(provider, credentials) && isOAuthProvider(provider) && resolved.connection.authKind === 'oauth' && credentials.refreshToken && shouldRefresh) {
       credentials = await refreshOAuthToken(provider, credentials, http)
       const stored = await this.store.get(clientId, resolved.connection.connectionId)
       if (!stored || !this.encryptionKeys) throw new Error('connection disappeared during token refresh')
@@ -62,6 +63,6 @@ export class TenantConnectionResolver {
         updatedAt,
       })
     }
-    return createProviderClient(provider, credentials, http, writeOptions)
+    return createConnectorClient(provider, credentials, http, writeOptions)
   }
 }

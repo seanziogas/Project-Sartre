@@ -9,10 +9,17 @@ export interface LlmClient {
   complete(req: { system: string; user: string; maxTokens?: number }): Promise<string>
 }
 
+export const DEFAULT_LLM_MODEL = 'claude-opus-4-8'
+
+/** Deployment override for the production model; the default stays pinned here. */
+export function llmModelFromEnvironment(env: Record<string, string | undefined>): string {
+  return env.SARTRE_LLM_MODEL?.trim() || DEFAULT_LLM_MODEL
+}
+
 export class AnthropicLlmClient implements LlmClient {
   private readonly client: Anthropic
   constructor(
-    private readonly model: string = 'claude-opus-4-8',
+    private readonly model: string = DEFAULT_LLM_MODEL,
     client?: Anthropic,
   ) {
     this.client = client ?? new Anthropic()

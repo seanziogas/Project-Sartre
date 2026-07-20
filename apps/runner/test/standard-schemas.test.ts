@@ -30,7 +30,7 @@ describe('standard deployment runtime schemas', () => {
       'sales.outbound': { campaignId: 'c1', templates },
       'marketing.copy-factory': { templates },
       'revops.routing': { rules: routing, ownerField: 'Kiln_Owner', reasoningField: 'Kiln_Reason' },
-      'revops.tam': { scoreField: 'Kiln_Score', tierField: 'Kiln_Tier', defaultScore: 0, defaultTier: 'review' },
+      'revops.tam': { scoreField: 'Kiln_Score', tierField: 'Kiln_Tier' },
       'platform.signals': { rules: [] },
     }
     for (const [key, schema] of Object.entries(StandardModuleConfigSchemas)) expect(schema.parse(values[key as keyof typeof values])).toBeTruthy()

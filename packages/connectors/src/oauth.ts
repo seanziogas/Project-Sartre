@@ -53,7 +53,7 @@ const defaults: Record<OAuthProviderId, { authorize: string; token: string; scop
   },
   hubspot: {
     authorize: 'https://app.hubspot.com/oauth/authorize',
-    token: 'https://api.hubapi.com/oauth/2026-03/token',
+    token: 'https://api.hubapi.com/oauth/v1/token',
     scopes: [
       'crm.objects.companies.read', 'crm.objects.companies.write',
       'crm.objects.contacts.read', 'crm.objects.contacts.write',
@@ -73,6 +73,8 @@ const defaults: Record<OAuthProviderId, { authorize: string; token: string; scop
   },
   fathom: {
     authorize: '',
+    // Not in Fathom's public docs (the public API is X-Api-Key based); registered-app
+    // OAuth must be verified against a live Fathom app before first production use.
     token: 'https://api.fathom.ai/external/v1/oauth2/token',
     scopes: ['public_api'],
   },

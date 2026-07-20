@@ -1,6 +1,7 @@
 import type { GateRecord, PipelineDefinition } from '@sartre/pipelines'
 import {
   campaignFactory,
+  gtmStrategist,
   replyHandler,
   router,
   signalWatcher,
@@ -16,6 +17,36 @@ export interface ReviewPlan<T> { summary: string; items: T[]; metadata?: Record<
 function requirePlan<T>(plan: ReviewPlan<T>, name: string): ReviewPlan<T> {
   if (!plan.summary.trim() || !Array.isArray(plan.items)) throw new Error(`${name} requires a summary and reviewable items`)
   return plan
+}
+
+function requireUnitCost(value: number, name: string): number {
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be finite and nonnegative`)
+  return value
+}
+
+/**
+ * Per-item LLM drafting must be fault-tolerant: one malformed model response
+ * (schema violation, grounding-guard rejection, non-JSON) drops that single
+ * item, never the whole batch — otherwise one flaky row strands an entire
+ * tenant run with no reviewable output. Returns the successful mappings plus
+ * the count that failed so the review summary can surface it.
+ */
+async function draftPerItem<TIn, TOut>(
+  items: TIn[],
+  map: (item: TIn) => Promise<TOut>,
+): Promise<{ items: TOut[]; failed: number }> {
+  const settled = await Promise.allSettled(items.map(map))
+  const results: TOut[] = []
+  let failed = 0
+  for (const outcome of settled) {
+    if (outcome.status === 'fulfilled') results.push(outcome.value)
+    else failed++
+  }
+  return { items: results, failed }
+}
+
+function failedSuffix(failed: number): string {
+  return failed ? `; ${failed} dropped on model/grounding errors` : ''
 }
 
 function reviewedPipeline<TInput, TPlan extends ReviewPlan<unknown>>(
@@ -83,14 +114,28 @@ export interface AccountPlay { accountId: string; accountName: string; play: str
 export interface AbmInput { accounts: Array<{ id: string; name: string; fields: Record<string, unknown> }> }
 export interface AbmDeps {
   loadAccounts(clientId: string): Promise<AbmInput>
-  planAccount(clientId: string, account: AbmInput['accounts'][number]): AccountPlay | null
+  brainContext(clientId: string): Promise<string>
+  llm: LlmClient
+  tokenUsdPerPlan: number
   activate(clientId: string, plays: AccountPlay[]): Promise<DispatchReceipt>
 }
 export function buildAbmPipeline(source: ClientDeps<AbmDeps>): PipelineDefinition {
   return {
     id: 'abm@0.1.0', moduleId: 'sales.abm', steps: [
       { id: 'load', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadAccounts(ctx.clientId) },
-      { id: 'plan', run: async (ctx) => { const deps = await resolveClientDeps(source, ctx.clientId); const items = (ctx.outputs.load as AbmInput).accounts.map((a) => deps.planAccount(ctx.clientId, a)).filter((x): x is AccountPlay => x !== null); return requirePlan({ summary: `${items.length} account plays`, items }, 'ABM plan') } },
+      { id: 'plan', run: async (ctx) => {
+        const deps = await resolveClientDeps(source, ctx.clientId)
+        const accounts = (ctx.outputs.load as AbmInput).accounts
+        requireUnitCost(deps.tokenUsdPerPlan, 'tokenUsdPerPlan')
+        if (accounts.length) ctx.spendTokensUsd(accounts.length * deps.tokenUsdPerPlan, `planned ${accounts.length} ABM accounts`)
+        const brainContext = await deps.brainContext(ctx.clientId)
+        const { items: planned, failed } = await draftPerItem(accounts, async (account) => ({
+          account, plan: await gtmStrategist.planAbmAccount({ account, brainContext }, deps.llm),
+        }))
+        const kept = planned.filter(({ plan }) => !plan.skip)
+        const items = kept.map(({ account, plan }) => ({ accountId: account.id, accountName: account.name, play: plan.play, rationale: plan.rationale, contacts: plan.contacts }))
+        return requirePlan({ summary: `${items.length} account plays; ${planned.length - kept.length} skipped as ICP misfits${failedSuffix(failed)}`, items }, 'ABM plan')
+      } },
       { id: 'review', run: async (ctx) => { const plan = ctx.outputs.plan as ReviewPlan<AccountPlay>; await ctx.gate('outbound_send', plan); return plan } },
       { id: 'activate', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).activate(ctx.clientId, (ctx.outputs.plan as ReviewPlan<AccountPlay>).items) },
     ],
@@ -101,14 +146,29 @@ export interface TakeoutCandidate { accountId: string; accountName: string; comp
 export interface TakeoutPlay extends TakeoutCandidate { angle: string; proof: string; draft: string }
 export interface TakeoutDeps {
   loadCandidates(clientId: string): Promise<TakeoutCandidate[]>
-  preparePlay(clientId: string, candidate: TakeoutCandidate): TakeoutPlay | null
+  brainContext(clientId: string): Promise<string>
+  llm: LlmClient
+  tokenUsdPerPlay: number
   activate(clientId: string, plays: TakeoutPlay[]): Promise<DispatchReceipt>
 }
 export function buildTakeoutPipeline(source: ClientDeps<TakeoutDeps>): PipelineDefinition {
   return {
     id: 'competitive-takeout@0.1.0', moduleId: 'sales.takeout', steps: [
       { id: 'load', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadCandidates(ctx.clientId) },
-      { id: 'prepare', run: async (ctx) => { const deps = await resolveClientDeps(source, ctx.clientId); const items = (ctx.outputs.load as TakeoutCandidate[]).map((c) => deps.preparePlay(ctx.clientId, c)).filter((x): x is TakeoutPlay => x !== null); return requirePlan({ summary: `${items.length} competitive takeout plays`, items }, 'takeout plan') } },
+      { id: 'prepare', run: async (ctx) => {
+        const deps = await resolveClientDeps(source, ctx.clientId)
+        const candidates = ctx.outputs.load as TakeoutCandidate[]
+        // Evidence-free candidates never reach the model — no evidence means no grounded angle.
+        const grounded = candidates.filter((candidate) => candidate.evidence.length > 0)
+        requireUnitCost(deps.tokenUsdPerPlay, 'tokenUsdPerPlay')
+        if (grounded.length) ctx.spendTokensUsd(grounded.length * deps.tokenUsdPerPlay, `drafted ${grounded.length} takeout plays`)
+        const brainContext = await deps.brainContext(ctx.clientId)
+        const { items, failed } = await draftPerItem(grounded, async (candidate) => {
+          const draft = await gtmStrategist.prepareTakeoutPlay({ candidate, brainContext }, deps.llm)
+          return { ...candidate, angle: draft.angle, proof: draft.proof, draft: draft.draft }
+        })
+        return requirePlan({ summary: `${items.length} competitive takeout plays; ${candidates.length - grounded.length} skipped without evidence${failedSuffix(failed)}`, items }, 'takeout plan')
+      } },
       { id: 'review', run: async (ctx) => { const plan = ctx.outputs.prepare as ReviewPlan<TakeoutPlay>; await ctx.gate('outbound_send', plan); return plan } },
       { id: 'activate', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).activate(ctx.clientId, (ctx.outputs.prepare as ReviewPlan<TakeoutPlay>).items) },
     ],
@@ -154,13 +214,35 @@ export function buildRepWorkflowsPipeline(source: ClientDeps<RepWorkflowsDeps>):
 // marketing ----------------------------------------------------------------
 export interface EventAttendee { id: string; email: string; event: string; attended: boolean; segment: string }
 export interface EventFollowup { attendeeId: string; email: string; event: string; play: string; draft: string }
-export interface EventsDeps { loadAttendees(clientId: string): Promise<EventAttendee[]>; draftFollowup(clientId: string, attendee: EventAttendee): EventFollowup | null; send(clientId: string, drafts: EventFollowup[]): Promise<DispatchReceipt> }
+export interface EventsDeps {
+  loadAttendees(clientId: string): Promise<EventAttendee[]>
+  brainContext(clientId: string): Promise<string>
+  llm: LlmClient
+  tokenUsdPerDraft: number
+  send(clientId: string, drafts: EventFollowup[]): Promise<DispatchReceipt>
+}
 export function buildEventsPipeline(source: ClientDeps<EventsDeps>): PipelineDefinition {
-  return reviewedPipeline('event-followup@0.1.0', 'marketing.events', 'outbound_send', {
-    load: async (clientId) => (await resolveClientDeps(source, clientId)).loadAttendees(clientId),
-    prepare: async (clientId, attendees) => { const deps = await resolveClientDeps(source, clientId); const items = attendees.map((a) => deps.draftFollowup(clientId, a)).filter((x): x is EventFollowup => x !== null); return { summary: `${items.length} event follow-up drafts`, items } },
-    execute: async (clientId, plan) => (await resolveClientDeps(source, clientId)).send(clientId, plan.items),
-  }, 'event follow-up plan')
+  return {
+    id: 'event-followup@0.1.0', moduleId: 'marketing.events', steps: [
+      { id: 'load', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadAttendees(ctx.clientId) },
+      { id: 'prepare', run: async (ctx) => {
+        const deps = await resolveClientDeps(source, ctx.clientId)
+        const attendees = (ctx.outputs.load as EventAttendee[]).filter((attendee) => attendee.email.trim())
+        requireUnitCost(deps.tokenUsdPerDraft, 'tokenUsdPerDraft')
+        if (attendees.length) ctx.spendTokensUsd(attendees.length * deps.tokenUsdPerDraft, `drafted ${attendees.length} event follow-ups`)
+        const brainContext = await deps.brainContext(ctx.clientId)
+        const { items, failed } = await draftPerItem(attendees, async (attendee) => {
+          // Play selection is deterministic; the model only writes the copy.
+          const play = attendee.attended ? 'attendee' : 'no-show'
+          const draft = await gtmStrategist.draftEventFollowup({ attendee, play, brainContext }, deps.llm)
+          return { attendeeId: attendee.id, email: attendee.email, event: attendee.event, play, draft: draft.draft }
+        })
+        return requirePlan({ summary: `${items.length} event follow-up drafts${failedSuffix(failed)}`, items }, 'event follow-up plan')
+      } },
+      { id: 'review', run: async (ctx) => { const plan = ctx.outputs.prepare as ReviewPlan<EventFollowup>; await ctx.gate('outbound_send', plan); return plan } },
+      { id: 'execute', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).send(ctx.clientId, (ctx.outputs.prepare as ReviewPlan<EventFollowup>).items) },
+    ],
+  }
 }
 
 export interface CopyFactoryInput { rows: campaignFactory.CampaignRow[] }
@@ -202,13 +284,33 @@ export function buildRoutingPipeline(source: ClientDeps<RoutingDeps>): PipelineD
 
 export interface TamAccount { id: string; name: string; fields: Record<string, string | number | boolean | null> }
 export interface TamScore { accountId: string; score: number; tier: string; reasons: string[]; plays: string[] }
-export interface TamDeps { loadAccounts(clientId: string): Promise<TamAccount[]>; score(clientId: string, account: TamAccount): TamScore; writeScores(clientId: string, scores: TamScore[]): Promise<DispatchReceipt> }
+export interface TamDeps {
+  loadAccounts(clientId: string): Promise<TamAccount[]>
+  brainContext(clientId: string): Promise<string>
+  llm: LlmClient
+  tokenUsdPerScore: number
+  writeScores(clientId: string, scores: TamScore[]): Promise<DispatchReceipt>
+}
 export function buildTamPipeline(source: ClientDeps<TamDeps>): PipelineDefinition {
-  return reviewedPipeline('tam-mapping@0.1.0', 'revops.tam', 'crm_write', {
-    load: async (clientId) => (await resolveClientDeps(source, clientId)).loadAccounts(clientId),
-    prepare: async (clientId, accounts) => { const deps = await resolveClientDeps(source, clientId); const items = accounts.map((a) => deps.score(clientId, a)); return { summary: `${items.length} TAM scores`, items } },
-    execute: async (clientId, plan) => (await resolveClientDeps(source, clientId)).writeScores(clientId, plan.items),
-  }, 'TAM plan')
+  return {
+    id: 'tam-mapping@0.1.0', moduleId: 'revops.tam', steps: [
+      { id: 'load', run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).loadAccounts(ctx.clientId) },
+      { id: 'prepare', run: async (ctx) => {
+        const deps = await resolveClientDeps(source, ctx.clientId)
+        const accounts = ctx.outputs.load as TamAccount[]
+        requireUnitCost(deps.tokenUsdPerScore, 'tokenUsdPerScore')
+        if (accounts.length) ctx.spendTokensUsd(accounts.length * deps.tokenUsdPerScore, `scored ${accounts.length} TAM accounts`)
+        const brainContext = await deps.brainContext(ctx.clientId)
+        const { items, failed } = await draftPerItem(accounts, async (account) => {
+          const assessment = await gtmStrategist.scoreTamAccount({ account, brainContext }, deps.llm)
+          return { accountId: account.id, score: assessment.score, tier: assessment.tier, reasons: assessment.reasons, plays: assessment.plays }
+        })
+        return requirePlan({ summary: `${items.length} TAM scores${failedSuffix(failed)}`, items }, 'TAM plan')
+      } },
+      { id: 'review', run: async (ctx) => { const plan = ctx.outputs.prepare as ReviewPlan<TamScore>; await ctx.gate('crm_write', plan); return plan } },
+      { id: 'execute', effect: true, run: async (ctx) => (await resolveClientDeps(source, ctx.clientId)).writeScores(ctx.clientId, (ctx.outputs.prepare as ReviewPlan<TamScore>).items) },
+    ],
+  }
 }
 
 export interface EtlChange { destination: string; object: string; externalId: string; fields: Record<string, unknown> }

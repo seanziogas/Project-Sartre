@@ -14,7 +14,7 @@ status: onboarding # onboarding | active | paused | archived
 
 commercial:
   plan: engagement # engagement during delivery; platform for post-engagement subscription
-  status: active # trialing | active | past_due | canceled
+  status: trialing # trialing | active | past_due | canceled — set active at engagement conversion
   licensed_modules: [] # empty = all manifest-enabled modules included
   portal_seats: 5
   renewal_date: null

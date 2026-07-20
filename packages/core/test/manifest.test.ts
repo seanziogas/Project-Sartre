@@ -12,7 +12,7 @@ describe('parseManifest', () => {
     expect(manifest.status).toBe('onboarding')
     expect(manifest.policies.approval.outbound_send).toBe('block')
     expect(manifest.modules['platform.learning']?.enabled).toBe(true)
-    expect(manifest.commercial).toMatchObject({ plan: 'engagement', status: 'active', portal_seats: 5 })
+    expect(manifest.commercial).toMatchObject({ plan: 'engagement', status: 'trialing', portal_seats: 5 })
   })
 
   it('blocks runs when the subscription is inactive or the module is unlicensed', () => {

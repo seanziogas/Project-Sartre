@@ -69,15 +69,19 @@ export interface RunnerModuleDeps {
   learning(clientId: string): LearningLoopDeps | Promise<LearningLoopDeps>
   quality(clientId: string): QualityMonitorDeps | Promise<QualityMonitorDeps>
   outbound(clientId: string): OutboundDeps | Promise<OutboundDeps>
-  abm(clientId: string): AbmDeps | Promise<AbmDeps>
-  takeout(clientId: string): TakeoutDeps | Promise<TakeoutDeps>
+  /** The runner injects the production LLM; deployments cannot replace it. */
+  abm(clientId: string): Omit<AbmDeps, 'llm'> | Promise<Omit<AbmDeps, 'llm'>>
+  /** The runner injects the production LLM; deployments cannot replace it. */
+  takeout(clientId: string): Omit<TakeoutDeps, 'llm'> | Promise<Omit<TakeoutDeps, 'llm'>>
   /** The runner injects the production LLM; deployments cannot replace it. */
   repWorkflows(clientId: string): Omit<RepWorkflowsDeps, 'llm'> | Promise<Omit<RepWorkflowsDeps, 'llm'>>
-  events(clientId: string): EventsDeps | Promise<EventsDeps>
+  /** The runner injects the production LLM; deployments cannot replace it. */
+  events(clientId: string): Omit<EventsDeps, 'llm'> | Promise<Omit<EventsDeps, 'llm'>>
   copyFactory(clientId: string): CopyFactoryDeps | Promise<CopyFactoryDeps>
   adsSync(clientId: string): AdsSyncDeps | Promise<AdsSyncDeps>
   routing(clientId: string): RoutingDeps | Promise<RoutingDeps>
-  tam(clientId: string): TamDeps | Promise<TamDeps>
+  /** The runner injects the production LLM; deployments cannot replace it. */
+  tam(clientId: string): Omit<TamDeps, 'llm'> | Promise<Omit<TamDeps, 'llm'>>
   etl(clientId: string): EtlDeps | Promise<EtlDeps>
   signals(clientId: string): SignalsDeps | Promise<SignalsDeps>
   digests(clientId: string): DigestsDeps | Promise<DigestsDeps>
@@ -100,6 +104,10 @@ export function buildRegistry(deps: RunnerModuleDeps, llm: LlmClient): MapRegist
   }
   const repWorkflows = async (clientId: string): Promise<RepWorkflowsDeps> => ({ ...await deps.repWorkflows(clientId), llm })
   const metrics = async (clientId: string): Promise<MetricsDeps> => ({ ...await deps.metrics(clientId), llm })
+  const abm = async (clientId: string): Promise<AbmDeps> => ({ ...await deps.abm(clientId), llm })
+  const takeout = async (clientId: string): Promise<TakeoutDeps> => ({ ...await deps.takeout(clientId), llm })
+  const events = async (clientId: string): Promise<EventsDeps> => ({ ...await deps.events(clientId), llm })
+  const tam = async (clientId: string): Promise<TamDeps> => ({ ...await deps.tam(clientId), llm })
   return new MapRegistry()
     .register(buildEnrichmentRefreshPipeline(deps.enrichment))
     .register(buildReactivationPipeline(reactivation))
@@ -112,14 +120,14 @@ export function buildRegistry(deps: RunnerModuleDeps, llm: LlmClient): MapRegist
     .register(buildLearningLoopPipeline(deps.learning))
     .register(buildQualityMonitorPipeline(deps.quality))
     .register(buildOutboundPipeline(deps.outbound))
-    .register(buildAbmPipeline(deps.abm))
-    .register(buildTakeoutPipeline(deps.takeout))
+    .register(buildAbmPipeline(abm))
+    .register(buildTakeoutPipeline(takeout))
     .register(buildRepWorkflowsPipeline(repWorkflows))
-    .register(buildEventsPipeline(deps.events))
+    .register(buildEventsPipeline(events))
     .register(buildCopyFactoryPipeline(deps.copyFactory))
     .register(buildAdsSyncPipeline(deps.adsSync))
     .register(buildRoutingPipeline(deps.routing))
-    .register(buildTamPipeline(deps.tam))
+    .register(buildTamPipeline(tam))
     .register(buildEtlPipeline(deps.etl))
     .register(buildSignalsPipeline(deps.signals))
     .register(buildDigestsPipeline(deps.digests))

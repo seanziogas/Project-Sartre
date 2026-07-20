@@ -2,7 +2,7 @@
 
 import { resolve } from 'node:path'
 import { FileClientBrainStore } from '@sartre/core'
-import { AnthropicLlmClient, brainCopilot } from '@sartre/skills'
+import { AnthropicLlmClient, brainCopilot, llmModelFromEnvironment } from '@sartre/skills'
 import { assertClientAccess, getPortalIdentity } from '@/lib/auth'
 import { getManifest } from '@/lib/data'
 
@@ -43,7 +43,7 @@ export async function askCopilotAction(
       question,
       brainContext,
       allowedSources: approved.map((doc) => doc.path),
-    }, new AnthropicLlmClient('claude-opus-4-8'))
+    }, new AnthropicLlmClient(llmModelFromEnvironment(process.env)))
     return { answer }
   } catch (error) {
     console.error('Brain copilot request failed', error)

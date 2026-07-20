@@ -5,7 +5,7 @@ The runner polls the same Postgres database as the ops app and registers all 23 
 Required environment:
 
 - `DATABASE_URL` — shared Postgres connection string.
-- `ANTHROPIC_API_KEY` — used only through `AnthropicLlmClient` with `claude-opus-4-8`.
+- `ANTHROPIC_API_KEY` — used only through `AnthropicLlmClient`; the model defaults to `claude-opus-4-8` and can be overridden with `SARTRE_LLM_MODEL`.
 - `SARTRE_CLIENTS_DIR` — optional client-instance path; defaults to `clients/`.
 - `SARTRE_TICK_MS` — optional polling interval; defaults to 30 seconds.
 - `SARTRE_HEALTH_PORT` — optional liveness/readiness port; defaults to `3001`. `GET /healthz` reports process liveness. `GET /readyz` becomes ready after a successful runner tick, becomes unavailable after a later tick/database failure, and recovers after the next successful tick.

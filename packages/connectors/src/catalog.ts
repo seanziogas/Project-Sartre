@@ -66,8 +66,18 @@ export function providerDefinition(provider: string): ProviderDefinition {
   return definition
 }
 
+/** Categories with an MCP bridge (see mcp.ts); an MCP connection needs only serverUrl. */
+const MCP_BRIDGEABLE_CATEGORIES: readonly ProviderCategory[] = ['comms', 'meetings', 'enrichment']
+
 export function validateProviderCredentials(provider: string, credentials: Record<string, string>, authKind?: string): SupportedProvider {
   const definition = providerDefinition(provider)
+  if (credentials.transport === 'mcp') {
+    if (!MCP_BRIDGEABLE_CATEGORIES.includes(definition.category)) {
+      throw new Error(`${provider} has no MCP bridge; only ${MCP_BRIDGEABLE_CATEGORIES.join(', ')} providers support transport:mcp`)
+    }
+    if (!credentials.serverUrl?.trim()) throw new Error(`${provider} MCP connection requires credential fields: serverUrl`)
+    return definition.id as SupportedProvider
+  }
   if (authKind && !(definition.auth as readonly string[]).includes(authKind)) {
     throw new Error(`${provider} does not support ${authKind} authentication`)
   }

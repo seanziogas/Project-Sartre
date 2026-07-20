@@ -27,7 +27,7 @@ describe('runner deployment loading', () => {
         'revops.dedup': { flagField: 'Kiln_Duplicate' },
         'sales.outbound': { campaignId: 'c1', templates }, 'marketing.copy-factory': { templates },
         'revops.routing': { rules: { rules: [], defaultOwner: null }, ownerField: 'Kiln_Owner', reasoningField: 'Kiln_Reason' },
-        'revops.tam': { scoreField: 'Kiln_Score', tierField: 'Kiln_Tier', defaultScore: 0, defaultTier: 'review' },
+        'revops.tam': { scoreField: 'Kiln_Score', tierField: 'Kiln_Tier' },
         'platform.signals': { rules: [] },
       },
     }

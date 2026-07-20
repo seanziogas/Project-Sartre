@@ -9,7 +9,7 @@ The codebase is deployable; production activation still depends on deployment-ow
 - Put the ops app behind an identity-aware reverse proxy that strips inbound `x-sartre-user-id`, injects the verified subject, and terminates HTTPS. Set `SARTRE_TRUSTED_AUTH_PROXY=true` only behind that boundary.
 - Configure `SARTRE_CREDENTIAL_ENCRYPTION_KEYS` as a JSON key-ID-to-base64-key map and set `SARTRE_CREDENTIAL_CURRENT_KEY_ID`. Store the keyring in the deployment secret manager. Keep the previous key until `npm run rotate-credentials` succeeds, verify its audited count, then remove it. The single-key variable is retained only for legacy migration.
 - Configure `SARTRE_PUBLIC_BASE_URL` and register the exact HTTPS OAuth callback with each client-owned provider app.
-- Supply `ANTHROPIC_API_KEY` only to services that need live LLM execution. The production model remains `claude-opus-4-8`; CI and local tests use scripted fakes.
+- Supply `ANTHROPIC_API_KEY` only to services that need live LLM execution. The production model defaults to `claude-opus-4-8` and may be overridden per deployment with `SARTRE_LLM_MODEL`; CI and local tests use scripted fakes.
 - Route runner `GET /healthz` for liveness and `GET /readyz` for readiness on `SARTRE_HEALTH_PORT` (default `3001`). Route ops `GET /api/health` as its database readiness probe.
 - Configure `OTEL_EXPORTER_OTLP_ENDPOINT` and optional JSON `OTEL_EXPORTER_OTLP_HEADERS` for the deployment collector. Alert on portal SLOs and collector-side runner/pipeline telemetry; payloads and credentials are never exported.
 - Run `npm run preflight` with deployment configuration before starting traffic. It performs metadata-only validation and never decrypts or tests provider credentials.

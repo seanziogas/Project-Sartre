@@ -10,4 +10,4 @@
 | Client-owned tool connections | Portal access is connector-independent; authorized client operators can add/revoke tenant-scoped encrypted credentials, resolved only at module execution time |
 | Full locked taxonomy | All 23 stable module IDs have registered pipelines; every external effect remains behind its appropriate human gate |
 
-Deployment still requires an identity proxy, real access grants, `DATABASE_URL`, and—only for live copilot requests—`ANTHROPIC_API_KEY`. Tool connections additionally require a deployment-held `SARTRE_CREDENTIAL_ENCRYPTION_KEY`; the portal itself does not. CI uses scripted LLM fakes and contains no credentials or client data.
+Deployment still requires an identity proxy, real access grants, `DATABASE_URL`, and—only for live copilot requests—`ANTHROPIC_API_KEY`. Tool connections additionally require the deployment-held versioned credential keyring (`SARTRE_CREDENTIAL_ENCRYPTION_KEYS` plus `SARTRE_CREDENTIAL_CURRENT_KEY_ID`; the legacy single `SARTRE_CREDENTIAL_ENCRYPTION_KEY` is read only during migration); the portal itself does not. CI uses scripted LLM fakes and contains no credentials or client data.

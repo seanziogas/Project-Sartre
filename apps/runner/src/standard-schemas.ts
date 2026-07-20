@@ -66,7 +66,7 @@ export const StandardModuleConfigSchemas = {
   'sales.outbound': z.object({ templates: CampaignTemplatesSchema, campaignId: nonempty }).strict(),
   'marketing.copy-factory': z.object({ templates: CampaignTemplatesSchema }).strict(),
   'revops.routing': z.object({ rules: RoutingRulesSchema, ownerField: nonempty, reasoningField: nonempty }).strict(),
-  'revops.tam': z.object({ scoreField: nonempty, tierField: nonempty, defaultScore: z.number().finite(), defaultTier: nonempty }).strict(),
+  'revops.tam': z.object({ scoreField: nonempty, tierField: nonempty }).strict(),
   'platform.signals': z.object({ rules: z.array(signalWatcher.SignalRule) }).strict(),
 } as const
 

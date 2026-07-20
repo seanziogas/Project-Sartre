@@ -216,14 +216,38 @@ export function createStandardModuleDeps(context: RunnerDeploymentContext): Runn
       const cfg = moduleConfig(await config(clientId), 'sales.outbound', StandardModuleConfigSchemas['sales.outbound'])
       return { loadCandidates: (id) => input(id, 'sales.outbound', StandardInputSchemas['sales.outbound'] as ZodType<OutboundInput>), templates: cfg.templates, enroll: async (id, rows) => enroll(id, cfg.campaignId, rows.map((row) => row.id)) }
     },
-    abm: async () => ({ loadAccounts: (id) => input(id, 'sales.abm', StandardInputSchemas['sales.abm']), planAccount: (_id, account) => ({ accountId: account.id, accountName: account.name, play: String(account.fields.play ?? 'account-review'), rationale: String(account.fields.rationale ?? 'approved account selection'), contacts: Array.isArray(account.fields.contacts) ? account.fields.contacts.map(String) : [] }), activate: (id, plays) => publish(id, 'sales.abm', plays) }),
-    takeout: async () => ({ loadCandidates: (id) => input(id, 'sales.takeout', StandardInputSchemas['sales.takeout']), preparePlay: (_id, candidate) => ({ ...candidate, angle: candidate.evidence[0] ?? 'competitive displacement', proof: candidate.evidence.join('; '), draft: `Competitive takeout: ${candidate.competitor}` }), activate: (id, plays) => publish(id, 'sales.takeout', plays) }),
+    abm: async (clientId) => ({
+      loadAccounts: (id) => input(id, 'sales.abm', StandardInputSchemas['sales.abm']),
+      brainContext: (id) => context.brains.loadContext(id, ['company.md', 'icp.md', 'use-cases.md', 'signals.md']),
+      tokenUsdPerPlan: cost(await config(clientId), 'abmPlanUsd', 0.02),
+      activate: (id, plays) => publish(id, 'sales.abm', plays),
+    }),
+    takeout: async (clientId) => ({
+      loadCandidates: (id) => input(id, 'sales.takeout', StandardInputSchemas['sales.takeout']),
+      brainContext: (id) => context.brains.loadContext(id, ['company.md', 'icp.md', 'voice.md', 'use-cases.md']),
+      tokenUsdPerPlay: cost(await config(clientId), 'takeoutPlayUsd', 0.02),
+      activate: (id, plays) => publish(id, 'sales.takeout', plays),
+    }),
     repWorkflows: async (clientId) => ({ loadWork: (id) => input(id, 'sales.rep-workflows', StandardInputSchemas['sales.rep-workflows']), brainContext: (id) => context.brains.loadContext(id, ['company.md', 'voice.md', 'use-cases.md']), tokenUsdPerReply: cost(await config(clientId), 'replyUsd', 0.02), executeApproved: (id, plan) => publish(id, 'sales.rep-workflows', plan) }),
-    events: async () => ({ loadAttendees: (id) => input(id, 'marketing.events', StandardInputSchemas['marketing.events']), draftFollowup: (_id, attendee) => attendee.email ? { attendeeId: attendee.id, email: attendee.email, event: attendee.event, play: attendee.attended ? 'attendee' : 'no-show', draft: `Follow up regarding ${attendee.event}` } : null, send: sendEventFollowups }),
+    events: async (clientId) => ({
+      loadAttendees: (id) => input(id, 'marketing.events', StandardInputSchemas['marketing.events']),
+      brainContext: (id) => context.brains.loadContext(id, ['company.md', 'voice.md']),
+      tokenUsdPerDraft: cost(await config(clientId), 'eventDraftUsd', 0.01),
+      send: sendEventFollowups,
+    }),
     copyFactory: async (clientId) => { const cfg = moduleConfig(await config(clientId), 'marketing.copy-factory', StandardModuleConfigSchemas['marketing.copy-factory']); return { loadBrief: (id) => input(id, 'marketing.copy-factory', StandardInputSchemas['marketing.copy-factory'] as ZodType<CopyFactoryInput>), templates: cfg.templates, publishDrafts: (id, campaign) => publish(id, 'marketing.copy-factory', campaign) } },
     adsSync: async (clientId) => { const runtime = await config(clientId); const provider = connection(runtime, 'audience'); if (!['linkedin-ads', 'google-ads', 'meta-ads'].includes(provider)) throw new Error(`unsupported standard audience provider ${provider}`); const audience = await context.tools.audience(clientId, provider as Parameters<typeof context.tools.audience>[1]); return { loadMutations: (id) => input(id, 'marketing.ads-sync', StandardInputSchemas['marketing.ads-sync']), sync: async (_id, mutations) => combineReceipts(await Promise.all(mutations.map((mutation) => audience.syncEmails(mutation.audience, mutation.add, mutation.remove)))) } },
     routing: async (clientId) => { const cfg = moduleConfig(await config(clientId), 'revops.routing', StandardModuleConfigSchemas['revops.routing']); return { loadRecords: (id) => input(id, 'revops.routing', StandardInputSchemas['revops.routing']), rules: cfg.rules as router.RoutingRules, writeAssignments: (id, decisions) => namespacedWrites(id, decisions.map((decision) => ({ object: 'contact', externalId: decision.id, fields: { [cfg.ownerField]: decision.owner, [cfg.reasoningField]: decision.reasoning } }))) } },
-    tam: async (clientId) => { const cfg = moduleConfig(await config(clientId), 'revops.tam', StandardModuleConfigSchemas['revops.tam']); return { loadAccounts: (id) => input(id, 'revops.tam', StandardInputSchemas['revops.tam']), score: (_id, account) => ({ accountId: account.id, score: Number(account.fields.score ?? cfg.defaultScore), tier: String(account.fields.tier ?? cfg.defaultTier), reasons: ['approved standard-runtime scoring inputs'], plays: [] }), writeScores: (id, scores) => namespacedWrites(id, scores.map((score) => ({ object: 'account', externalId: score.accountId, fields: { [cfg.scoreField]: score.score, [cfg.tierField]: score.tier } }))) } },
+    tam: async (clientId) => {
+      const runtime = await config(clientId)
+      const cfg = moduleConfig(runtime, 'revops.tam', StandardModuleConfigSchemas['revops.tam'])
+      return {
+        loadAccounts: (id) => input(id, 'revops.tam', StandardInputSchemas['revops.tam']),
+        brainContext: (id) => context.brains.loadContext(id, ['icp.md', 'grading.md']),
+        tokenUsdPerScore: cost(runtime, 'tamScoreUsd', 0.005),
+        writeScores: (id, scores) => namespacedWrites(id, scores.map((score) => ({ object: 'account', externalId: score.accountId, fields: { [cfg.scoreField]: score.score, [cfg.tierField]: score.tier } }))),
+      }
+    },
     etl: async (clientId) => { const runtime = await config(clientId); const provider = connection(runtime, 'warehouse'); if (!['snowflake', 'bigquery', 'databricks', 'redshift'].includes(provider)) throw new Error(`unsupported standard warehouse ${provider}`); const warehouse: WarehouseClient = await context.tools.warehouse(clientId, provider as Parameters<typeof context.tools.warehouse>[1]); return { loadChanges: (id) => input(id, 'revops.etl', StandardInputSchemas['revops.etl']), validate: async (_id, changes) => ({ valid: changes.filter((change) => typeof change.fields.sql === 'string'), rejected: changes.filter((change) => typeof change.fields.sql !== 'string').map((change) => ({ change, reason: 'fields.sql is required' })) }), write: async (_id, changes) => combineReceipts(await Promise.all(changes.map(async (change) => warehouse.execute(String(change.fields.sql), scalarRecord(change.fields.bindings && typeof change.fields.bindings === 'object' ? change.fields.bindings as Record<string, unknown> : {})))) ) } },
     signals: async (clientId) => { const cfg = moduleConfig(await config(clientId), 'platform.signals', StandardModuleConfigSchemas['platform.signals']); return { loadSignals: (id) => input(id, 'platform.signals', StandardInputSchemas['platform.signals']), rules: cfg.rules, persistTriggers: (id, matches) => publish(id, 'platform.signals', matches) } },
     digests: async () => ({ loadDigest: (id) => input(id, 'platform.digests', StandardInputSchemas['platform.digests']), deliver: async (id, digest) => { await notify(id, digest.title, digest.markdown); return { affected: 1 } } }),

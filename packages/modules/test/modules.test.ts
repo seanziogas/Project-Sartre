@@ -915,4 +915,96 @@ describe('dedicated locked module pipelines', () => {
     await engine.resolveGate(pipeline, 'signals-dedicated', 'review:internal_report', 'approved', 'gtme@kiln', m)
     expect(persisted).toBe(1)
   })
+
+  it('sales.abm plans brain-grounded plays with the GTM Strategist and drops model-skipped misfits', async () => {
+    const activated: unknown[] = []
+    const llm: LlmClient = {
+      complete: async ({ user }) => user.includes('"gov1"')
+        ? JSON.stringify({ play: 'none', rationale: 'Government — hard disqualifier', contacts: [], skip: true, status: 'draft' })
+        : JSON.stringify({ play: 'fleet-visibility', rationale: 'Matches the fleet visibility use case', contacts: ['Dana VP Ops'], skip: false, status: 'draft' }),
+    }
+    const pipeline = buildAbmPipeline({
+      loadAccounts: async () => ({ accounts: [{ id: 'a1', name: 'Acme', fields: { contacts: ['Dana VP Ops'] } }, { id: 'gov1', name: 'GovCo', fields: {} }] }),
+      brainContext: async () => 'ICP: $100M+ logistics. Disqualifier: government.',
+      llm, tokenUsdPerPlan: 0.02,
+      activate: async (_clientId, plays) => { activated.push(...plays); return { affected: plays.length } },
+    })
+    const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW, runId: 'abm-dedicated' })
+    const m = manifest('sales.abm')
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(activated).toHaveLength(0)
+    await engine.resolveGate(pipeline, 'abm-dedicated', 'review:outbound_send', 'approved', 'gtme@kiln', m)
+    expect(activated).toEqual([expect.objectContaining({ accountId: 'a1', play: 'fleet-visibility', contacts: ['Dana VP Ops'] })])
+  })
+
+  it('sales.takeout drafts evidence-quoting plays and skips evidence-free candidates before the model', async () => {
+    let llmCalls = 0
+    const activated: Array<{ proof: string }> = []
+    const llm: LlmClient = {
+      complete: async () => { llmCalls++; return JSON.stringify({ angle: 'renewal timing', proof: 'Renewal in Q3 per CRM note', draft: 'Worth comparing before Q3?', status: 'draft' }) },
+    }
+    const pipeline = buildTakeoutPipeline({
+      loadCandidates: async () => [
+        { accountId: 'a1', accountName: 'Acme', competitor: 'Other', evidence: ['Renewal in Q3 per CRM note'] },
+        { accountId: 'a2', accountName: 'Beta', competitor: 'Other', evidence: [] },
+      ],
+      brainContext: async () => 'Voice: direct. Proof points: fleet visibility case study.',
+      llm, tokenUsdPerPlay: 0.02,
+      activate: async (_clientId, plays) => { activated.push(...plays); return { affected: plays.length } },
+    })
+    const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW, runId: 'takeout-dedicated' })
+    const m = manifest('sales.takeout')
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(llmCalls).toBe(1)
+    await engine.resolveGate(pipeline, 'takeout-dedicated', 'review:outbound_send', 'approved', 'gtme@kiln', m)
+    expect(activated).toEqual([expect.objectContaining({ accountId: 'a1', proof: 'Renewal in Q3 per CRM note' })])
+  })
+
+  it('marketing.events drafts follow-ups with deterministic play selection and sends only after approval', async () => {
+    const sent: Array<{ play: string; draft: string }> = []
+    const llm: LlmClient = {
+      complete: async ({ user }) => JSON.stringify({ draft: user.includes('no-show') ? 'Sorry we missed you at Summit.' : 'Thanks for joining Summit.', status: 'draft' }),
+    }
+    const pipeline = buildEventsPipeline({
+      loadAttendees: async () => [
+        { id: 'e1', email: 'buyer@example.com', event: 'Summit', attended: true, segment: 'enterprise' },
+        { id: 'e2', email: 'other@example.com', event: 'Summit', attended: false, segment: 'enterprise' },
+      ],
+      brainContext: async () => 'Voice: warm, concise.',
+      llm, tokenUsdPerDraft: 0.01,
+      send: async (_clientId, drafts) => { sent.push(...drafts); return { affected: drafts.length } },
+    })
+    const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW, runId: 'events-dedicated' })
+    const m = manifest('marketing.events')
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(sent).toHaveLength(0)
+    await engine.resolveGate(pipeline, 'events-dedicated', 'review:outbound_send', 'approved', 'gtme@kiln', m)
+    expect(sent).toEqual([
+      expect.objectContaining({ attendeeId: 'e1', play: 'attendee', draft: 'Thanks for joining Summit.' }),
+      expect.objectContaining({ attendeeId: 'e2', play: 'no-show', draft: 'Sorry we missed you at Summit.' }),
+    ])
+  })
+
+  it('revops.tam scores against the ICP with grounded reasons and writes only after approval', async () => {
+    const written: unknown[] = []
+    const llm: LlmClient = {
+      complete: async () => JSON.stringify({ score: 88, tier: 'A', reasons: ['revenue 200M clears the $100M ICP floor'], plays: ['fleet-visibility'] }),
+    }
+    const pipeline = buildTamPipeline({
+      loadAccounts: async () => [{ id: 'a1', name: 'Acme', fields: { revenue: 200 } }],
+      brainContext: async () => 'ICP floor: $100M revenue. Tier A: strong fit.',
+      llm, tokenUsdPerScore: 0.005,
+      writeScores: async (_clientId, scores) => { written.push(...scores); return { affected: scores.length } },
+    })
+    const engine = new PipelineEngine(new MemoryRunStore(), { now: NOW, runId: 'tam-dedicated' })
+    const m = manifest('revops.tam')
+    const parked = await engine.start(pipeline, m, 'Acme')
+    expect(parked.status).toBe('awaiting_approval')
+    expect(written).toHaveLength(0)
+    await engine.resolveGate(pipeline, 'tam-dedicated', 'review:crm_write', 'approved', 'gtme@kiln', m)
+    expect(written).toEqual([expect.objectContaining({ accountId: 'a1', score: 88, tier: 'A', reasons: ['revenue 200M clears the $100M ICP floor'] })])
+  })
 })

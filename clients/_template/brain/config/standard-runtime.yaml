@@ -22,6 +22,10 @@ config:
     copilotBriefUsd: 0.05
     replyUsd: 0.02
     metricsReportUsd: 0.08
+    abmPlanUsd: 0.02
+    takeoutPlayUsd: 0.02
+    eventDraftUsd: 0.01
+    tamScoreUsd: 0.005
   modules:
     crm:
       namespacePrefix: "Kiln_"
@@ -91,7 +95,5 @@ config:
     revops.tam:
       scoreField: Kiln_TAM_Score__c
       tierField: Kiln_TAM_Tier__c
-      defaultScore: 0
-      defaultTier: review
     platform.signals:
       rules: []

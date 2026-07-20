@@ -211,7 +211,7 @@ describe('operational control stores (against PGlite)', () => {
   it('exports no credential envelopes and restores a checksum-ready tenant dataset into an empty target', async () => {
     const clientId = 'Portable'
     const runs = new PostgresRunStore(db)
-    await new PipelineEngine(runs, { runId: 'portable-r1' }).start(
+    await new PipelineEngine(runs, { runId: 'portable-r1', now: () => new Date('2026-07-14T12:00:00Z') }).start(
       { id: 'portable@1', moduleId: 'revops.enrichment', steps: [{ id: 'done', run: async () => 'ok' }] }, manifest(), clientId,
     )
     const artifacts = new PostgresRuntimeArtifactStore(db)

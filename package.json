@@ -23,7 +23,8 @@
     "governance-decide": "npm run governance-decide --workspace @sartre/runner --",
     "restore-tenant": "npm run restore-tenant --workspace @sartre/runner --",
     "record-eval": "npm run record-eval --workspace @sartre/runner --",
-    "shadow:fake": "node tools/shadow-hologram/run.mjs --fake --synthetic"
+    "shadow:fake": "node tools/shadow-hologram/run.mjs --fake --synthetic",
+    "seed-demo": "npm run seed-demo --workspace @sartre/runner"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

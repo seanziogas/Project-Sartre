@@ -1,0 +1,26 @@
+# Local development Postgres for Sartre. NOT a production deployment — see
+# docs/production-readiness.md and docs/deployment-runbook.md for prod.
+#
+#   docker compose up -d
+#   export DATABASE_URL='postgres://sartre:dev@localhost:5432/sartre'
+#
+# The runner and ops app both connect to this via DATABASE_URL.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: sartre
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: sartre
+    ports:
+      - "5432:5432"
+    volumes:
+      - sartre-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sartre -d sartre"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  sartre-pg:

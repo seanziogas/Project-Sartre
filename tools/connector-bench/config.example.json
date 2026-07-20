@@ -1,0 +1,8 @@
+{
+  "provider": "slack",
+  "operation": "sendMessage",
+  "iterations": 10,
+  "args": { "destination": "C0DEV_CHANNEL", "text": "connector benchmark ping" },
+  "rest": { "accessToken": "<slack bot token>" },
+  "mcp": { "serverUrl": "https://your-mcp-host.example/mcp", "accessToken": "<mcp bearer token>" }
+}

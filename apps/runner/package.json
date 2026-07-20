@@ -13,7 +13,8 @@
     "governance-request": "node dist/governance-request-main.js",
     "governance-decide": "node dist/governance-decide-main.js",
     "restore-tenant": "node dist/restore-tenant-main.js",
-    "record-eval": "node dist/record-eval-main.js"
+    "record-eval": "node dist/record-eval-main.js",
+    "seed-demo": "node dist/seed-demo-main.js"
   },
   "dependencies": {
     "@sartre/connectors": "*",

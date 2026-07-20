@@ -18,14 +18,19 @@ config:
     comms: "REPLACE_WITH_CHANNEL_ID"
     email: "ops@example.com"
   costs:
+    # Per-item USD budget ceilings debited by ctx.spendTokensUsd. Grounded in
+    # Claude Opus 4.8 pricing ($5/M input, $25/M output) with adaptive thinking:
+    # a strategist call is ~4k input + ~1.5-2.5k output ≈ $0.06-0.08. Values are
+    # deliberately conservative overestimates so the run budget trips early, not
+    # late; each client tunes them against observed spend.
     graderRowUsd: 0.01
     copilotBriefUsd: 0.05
     replyUsd: 0.02
     metricsReportUsd: 0.08
-    abmPlanUsd: 0.02
-    takeoutPlayUsd: 0.02
-    eventDraftUsd: 0.01
-    tamScoreUsd: 0.005
+    abmPlanUsd: 0.07
+    takeoutPlayUsd: 0.08
+    eventDraftUsd: 0.04
+    tamScoreUsd: 0.04
   modules:
     crm:
       namespacePrefix: "Kiln_"

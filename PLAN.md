@@ -4,7 +4,10 @@
 
 Every client The Kiln onboards gets a Sartre instance: their brain, their tool connections, their enabled modules, their thresholds, their learned behavior. The core is identical everywhere — that is what makes it repeatable, scalable, and reliable. The configuration and the learning are what make it theirs. The goal is continuous, visible value that makes clients renew: the system compounds on their own data and their own behavior, which makes it very hard to churn from.
 
-**Status:** Final plan, pre-build.
+**Status:** Design record. The Phase 0–4 build described here is complete — see
+[README.md](README.md) for current status and [CHANGELOG.md](CHANGELOG.md) for what shipped.
+This document is retained as the architecture and design spec; the readiness docs and ADRs
+map their evidence to its sections. It is not an active task list.
 **Decisions locked:** V1 is internal-first but portal-ready. Fresh canonical repo (this one). Built from scratch as a repeatable product — not a replication of any single client engagement. Full GTM stack coverage: sales, marketing, and RevOps.
 
 ---
